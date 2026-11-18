@@ -1,0 +1,20 @@
+# binaries
+/host-telemetry
+/dist/
+/bin/
+
+# test/coverage
+*.test
+*.out
+coverage.*
+
+# local config and runtime state
+/config.yaml
+*.wal
+*.log
+
+# editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
