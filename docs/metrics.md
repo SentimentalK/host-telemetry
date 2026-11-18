@@ -66,14 +66,14 @@ for dashboards, and `workload.id` is always preferred over it.
 
 | Metric | Type | Unit | Attributes | Why |
 |---|---|---|---|---|
-| `process.cpu.time` / `process.cpu.utilization` | Counter / Gauge | `s` / `1` | `process.pid`, `process.command`, `process.parent_pid` | Per-agent CPU |
-| `process.memory.usage` | UpDownCounter | `By` | same | RSS; over-counts shared pages — never sum it into host totals |
-| `process.memory.virtual` | UpDownCounter | `By` | same | Catch "address space exploded" bugs |
-| `process.thread.count` | UpDownCounter | `{thread}` | same | Thread leaks look exactly like slowness |
+| `process.cpu.time` / `process.cpu.utilization` | Counter / Gauge | `s` / `1` | `cpu.mode` | Per-agent CPU |
+| `process.memory.usage` | UpDownCounter | `By` | — | RSS; over-counts shared pages — never sum it into host totals |
+| `process.memory.virtual` | UpDownCounter | `By` | — | Catch "address space exploded" bugs |
+| `process.thread.count` | UpDownCounter | `{thread}` | — | Thread leaks look exactly like slowness |
 | `process.disk.io` | Counter | `By` | + `disk.io.direction` | Which agent is thrashing the disk |
 | `process.context_switches` | Counter | `{context_switch}` | + `process.context_switch.type=voluntary\|involuntary` | Involuntary switches = CPU oversubscription |
-| `process.unix.file_descriptor.count` / `process.windows.handle.count` | UpDownCounter | `{file_descriptor}\|{handle}` | same | FD exhaustion in long-running agents |
-| `process.uptime` | Gauge | `s` | same | Restart detection |
+| `process.unix.file_descriptor.count` / `process.windows.handle.count` | UpDownCounter | `{file_descriptor}\|{handle}` | — | FD exhaustion in long-running agents |
+| `process.uptime` | Gauge | `s` | — | Restart detection |
 
 ## Collector self-observability (proves G4)
 
@@ -90,9 +90,12 @@ for dashboards, and `workload.id` is always preferred over it.
 ## Reading order (how an AI should use this)
 
 1. `system.pressure.utilization{type="full"}` — was anything actually stalled?
-2. If `memory`: check `system.paging.operations{type="major"}` and `workload.memory.usage` top-k.
-3. If `cpu`: check `system.cpu.utilization`, then `process.context_switches{type="involuntary"}`.
+2. If `memory`: check `system.paging.operations{system.paging.fault.type="major"}` and `workload.memory.usage` top-k.
+3. If `cpu`: check `system.cpu.utilization`, then `process.context_switches{process.context_switch.type="involuntary"}`.
 4. If `io`: check `system.disk.operation_time / system.disk.operations` for latency, then per-workload `process.disk.io`.
 5. If none are elevated: the bottleneck is outside the host — rate limits, network, or waiting on a human. Check `workload.count{state="blocked"}` and the event stream.
+
+The pinned model attaches no `process.pid`/`process.command`/`process.parent_pid` attribute to
+`process.*` metrics; per-process identity needs an ADR plus a schema bump before it can be emitted.
 
 `/metrics` uses normalized sample names (dots to underscores, `_total` on counters); the OTel name and UCUM unit stay in the `# HELP` text — debug output, not the contract.
