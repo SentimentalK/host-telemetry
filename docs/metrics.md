@@ -17,23 +17,23 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `system.cpu.time` | Counter | `s` | `cpu.mode`, `cpu.logical_number` | L M W | 15s | Rate source when the backend prefers counters |
 | `system.cpu.frequency` | Gauge | `Hz` | `cpu.logical_number` | L M W | 30s | Frequency collapse at constant utilization = throttling |
 | `system.cpu.logical.count` / `system.cpu.physical.count` | UpDownCounter | `{cpu}` | — | L M W | 300s | Normalizes every per-core metric across machines |
-| `system.memory.usage` | UpDownCounter | `By` | `system.memory.state=used\|available\|free\|cached\|buffered` | L M W | 15s | `available` (not `free`) is the only honest "how much is left" |
+| `system.memory.usage` | UpDownCounter | `By` | `system.memory.state=used\|available` | L M W | 15s | `available` (not `free`) is the only honest "how much is left" |
 | `system.memory.limit` | UpDownCounter | `By` | — | L M W | 300s | Denominator for utilization; changes on hot-plug |
-| `system.memory.utilization` | Gauge | `1` | — | L M W | 15s | Cheap alerting signal |
+| `system.memory.utilization` | Gauge | `1` | `system.memory.state=used\|available` | L M W | 15s | Cheap alerting signal |
 | `system.paging.usage` | UpDownCounter | `By` | `system.paging.state=used\|free` | L M W | 15s | Swap in use; correlated with the first slow minute |
-| `system.paging.operations` | Counter | `{operation}` | `system.paging.type=major\|minor`, `system.paging.direction=page_in\|page_out` | L M W | 15s | Major faults / swap-in rate is the actual thrash signal |
-| `system.paging.faults` | Counter | `{fault}` | `system.paging.type` | L M W | 15s | Distinguishes cold cache from real pressure |
-| `system.disk.io` | Counter | `By` | `disk.io.direction=read\|write`, `system.device` | L M W | 15s | Throughput, not latency |
-| `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
-| `system.disk.io_time` | Counter | `s` | `system.device` | L M W | 15s | Busy-time; the closest portable `%util` |
-| `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device` | L M W | 15s | Divide by operations for latency — the metric people actually need |
+| `system.paging.operations` | Counter | `{operation}` | `system.paging.fault.type=major\|minor`, `system.paging.direction=in\|out` | L M W | 15s | Major faults / swap-in rate is the actual thrash signal |
+| `system.paging.faults` | Counter | `{fault}` | `system.paging.fault.type=major\|minor` | L M W | 15s | Distinguishes cold cache from real pressure |
+| `system.disk.io` | Counter | `By` | `disk.io.direction=read\|write`, `system.device.name` | L M W | 15s | Throughput, not latency |
+| `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device.name` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
+| `system.disk.io_time` | Counter | `s` | `system.device.name` | L M W | 15s | Busy-time; the closest portable `%util` |
+| `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device.name` | L M W | 15s | Divide by operations for latency — the metric people actually need |
 | `system.filesystem.usage` | UpDownCounter | `By` | `system.filesystem.state=used\|free\|reserved`, `system.filesystem.mountpoint`, `system.filesystem.type` | L M W | 60s | Disk-full is a classic silent failure |
 | `system.filesystem.utilization` | Gauge | `1` | same | L M W | 60s | Derived, but cheap to keep for alerts |
-| `system.network.io` | Counter | `By` | `network.io.direction=receive\|transmit`, `system.device` | L M W | 15s | "Big traffic came in" needs an interface-level denominator |
-| `system.network.errors` | Counter | `{error}` | `network.io.direction`, `system.device` | L M W | 15s | Hardware/driver trouble disguised as application slowness |
-| `system.network.packet.dropped` | Counter | `{packet}` | direction, device | L M W | 15s | Drops explain retransmit-shaped latency |
+| `system.network.io` | Counter | `By` | `network.io.direction=receive\|transmit`, `network.interface.name` | L M W | 15s | "Big traffic came in" needs an interface-level denominator |
+| `system.network.errors` | Counter | `{error}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Hardware/driver trouble disguised as application slowness |
+| `system.network.packet.dropped` | Counter | `{packet}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Drops explain retransmit-shaped latency |
 | `system.network.connection.count` | UpDownCounter | `{connection}` | `network.transport=tcp`, `network.connection.state` | L M W | 15s | Connection storms from many agents |
-| `system.process.count` | UpDownCounter | `{process}` | `system.process.state=running\|sleeping\|zombie` | L M W | 15s | Zombie/leak detection |
+| `system.process.count` | UpDownCounter | `{process}` | `process.state=running\|sleeping\|stopped\|defunct` | L M W | 15s | Zombie/leak detection |
 | `system.process.created` | Counter | `{process}` | — | L M W | 15s | Fork storms (test runners, builds) |
 | `system.uptime` | Gauge | `s` | — | L M W | 60s | Proves the boot-install worked and detects unnoticed reboots |
 
@@ -71,21 +71,21 @@ for dashboards, and `workload.id` is always preferred over it.
 | `process.memory.virtual` | UpDownCounter | `By` | same | Catch "address space exploded" bugs |
 | `process.thread.count` | UpDownCounter | `{thread}` | same | Thread leaks look exactly like slowness |
 | `process.disk.io` | Counter | `By` | + `disk.io.direction` | Which agent is thrashing the disk |
-| `process.context_switches` | Counter | `{context_switch}` | + `process.context_switch_type=voluntary\|involuntary` | Involuntary switches = CPU oversubscription |
-| `process.unix.file_descriptor.count` / `process.windows.handle.count` | UpDownCounter | `{fd}\|{handle}` | same | FD exhaustion in long-running agents |
+| `process.context_switches` | Counter | `{context_switch}` | + `process.context_switch.type=voluntary\|involuntary` | Involuntary switches = CPU oversubscription |
+| `process.unix.file_descriptor.count` / `process.windows.handle.count` | UpDownCounter | `{file_descriptor}\|{handle}` | same | FD exhaustion in long-running agents |
 | `process.uptime` | Gauge | `s` | same | Restart detection |
 
 ## Collector self-observability (proves G4)
 
-| Metric | Type | Unit | Why |
-|---|---|---|---|
-| `collector.self.cpu.time` | Counter | `s` | The overhead claim, measured by the process itself |
-| `collector.self.memory.usage` | UpDownCounter | `By` | Same |
-| `collector.wal.size` | Gauge | `By` | Bounded buffer proof |
-| `collector.wal.dropped` | Counter | `{sample}` | Silent loss must never be silent |
-| `collector.send.queue.length` | Gauge | `{sample}` | Backpressure visibility |
-| `collector.scrape.duration` | Gauge | `s` | Per-source cost; catches a source misbehaving |
-| `collector.source.error` | Counter | `{error}` | Partial-failure isolation |
+| Metric | Type | Unit | Attributes | Why |
+|---|---|---|---|---|
+| `collector.self.cpu.time` | Counter | `s` | — | The overhead claim, measured by the process itself |
+| `collector.self.memory.usage` | UpDownCounter | `By` | — | Same |
+| `collector.wal.size` | Gauge | `By` | — | Bounded buffer proof |
+| `collector.wal.dropped` | Counter | `{sample}` | — | Silent loss must never be silent |
+| `collector.send.queue.length` | Gauge | `{sample}` | — | Backpressure visibility |
+| `collector.scrape.duration` | Gauge | `s` | — | Per-source cost; catches a source misbehaving |
+| `collector.source.error` | Counter | `{error}` | `collector.source` | Partial-failure isolation |
 
 ## Reading order (how an AI should use this)
 
@@ -94,3 +94,5 @@ for dashboards, and `workload.id` is always preferred over it.
 3. If `cpu`: check `system.cpu.utilization`, then `process.context_switches{type="involuntary"}`.
 4. If `io`: check `system.disk.operation_time / system.disk.operations` for latency, then per-workload `process.disk.io`.
 5. If none are elevated: the bottleneck is outside the host — rate limits, network, or waiting on a human. Check `workload.count{state="blocked"}` and the event stream.
+
+`/metrics` uses normalized sample names (dots to underscores, `_total` on counters); the OTel name and UCUM unit stay in the `# HELP` text — debug output, not the contract.
