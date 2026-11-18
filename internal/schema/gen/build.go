@@ -163,7 +163,11 @@ func (m *model) addMetric(doc *document, name string, e entry) error {
 	if err != nil {
 		return fmt.Errorf("%s: metric %q: %w", doc.Path, name, err)
 	}
-	ids, err := m.expand(doc, e.Attributes, nil)
+	uses := e.Attributes
+	if e.Extends != "" {
+		uses = append([]entry{{Extends: e.Extends}}, e.Attributes...)
+	}
+	ids, err := m.expand(doc, uses, nil)
 	if err != nil {
 		return err
 	}
