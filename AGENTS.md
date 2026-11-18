@@ -31,6 +31,9 @@ The contract in `README.md` is the deliverable. Code exists to satisfy it.
 
 ## Workflow
 
+The `Makefile`, `go.mod` and `cmd/host-telemetry/main.go` do not exist yet — creating them with
+working targets is the first task of M0. Targets are fixed by this contract:
+
 ```sh
 make generate   # regenerate schema constants from the vendored semconv model
 make test       # unit + golden tests over testdata/{linux,darwin,windows}
@@ -38,6 +41,8 @@ make budget     # overhead benchmark (CPU/RSS/collect duration)
 make lint
 make run        # foreground collector, /metrics on :9101
 ```
+
+Module path: `github.com/SentimentalK/host-telemetry`.
 
 - Golden tests are the safety net: raw platform fixtures in `testdata/<os>/` always produce the same
   series set. Adding a source means adding a fixture, not only code.
