@@ -20,19 +20,19 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `system.memory.usage` | UpDownCounter | `By` | `system.memory.state=used\|available` | L M W | 15s | `available` (not `free`) is the only honest "how much is left" |
 | `system.memory.limit` | UpDownCounter | `By` | — | L M W | 300s | Denominator for utilization; changes on hot-plug |
 | `system.memory.utilization` | Gauge | `1` | `system.memory.state=used\|available` | L M W | 15s | Cheap alerting signal |
-| `system.paging.usage` | UpDownCounter | `By` | `system.paging.state=used\|free` | L M W | 15s | Swap in use; correlated with the first slow minute |
+| `system.paging.usage` | UpDownCounter | `By` | `system.paging.state=used\|free`, `system.device.name` | L M W | 15s | Swap in use; correlated with the first slow minute |
 | `system.paging.operations` | Counter | `{operation}` | `system.paging.fault.type=major\|minor`, `system.paging.direction=in\|out` | L M W | 15s | Major faults / swap-in rate is the actual thrash signal |
 | `system.paging.faults` | Counter | `{fault}` | `system.paging.fault.type=major\|minor` | L M W | 15s | Distinguishes cold cache from real pressure |
 | `system.disk.io` | Counter | `By` | `disk.io.direction=read\|write`, `system.device.name` | L M W | 15s | Throughput, not latency |
 | `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device.name` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
 | `system.disk.io_time` | Counter | `s` | `system.device.name` | L M W | 15s | Busy-time; the closest portable `%util` |
 | `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device.name` | L M W | 15s | Divide by operations for latency — the metric people actually need |
-| `system.filesystem.usage` | UpDownCounter | `By` | `system.filesystem.state=used\|free\|reserved`, `system.filesystem.mountpoint`, `system.filesystem.type` | L M W | 60s | Disk-full is a classic silent failure |
-| `system.filesystem.utilization` | Gauge | `1` | same | L M W | 60s | Derived, but cheap to keep for alerts |
+| `system.filesystem.usage` | UpDownCounter | `By` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 60s | Disk-full is a classic silent failure |
+| `system.filesystem.utilization` | Gauge | `1` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 60s | Derived, but cheap to keep for alerts |
 | `system.network.io` | Counter | `By` | `network.io.direction=receive\|transmit`, `network.interface.name` | L M W | 15s | "Big traffic came in" needs an interface-level denominator |
 | `system.network.errors` | Counter | `{error}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Hardware/driver trouble disguised as application slowness |
 | `system.network.packet.dropped` | Counter | `{packet}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Drops explain retransmit-shaped latency |
-| `system.network.connection.count` | UpDownCounter | `{connection}` | `network.transport=tcp`, `network.connection.state` | L M W | 15s | Connection storms from many agents |
+| `system.network.connection.count` | UpDownCounter | `{connection}` | `network.interface.name`, `network.transport=tcp`, `network.connection.state` | L M W | 15s | Connection storms from many agents |
 | `system.process.count` | UpDownCounter | `{process}` | `process.state=running\|sleeping\|stopped\|defunct` | L M W | 15s | Zombie/leak detection |
 | `system.process.created` | Counter | `{process}` | — | L M W | 15s | Fork storms (test runners, builds) |
 | `system.uptime` | Gauge | `s` | — | L M W | 60s | Proves the boot-install worked and detects unnoticed reboots |
@@ -46,8 +46,8 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `hw.fan.speed` | Gauge | `rpm` | `hw.id`, `hw.name`, `hw.sensor_location` | L M W | 30s | Fans pinned at max + falling frequency = thermal wall |
 | `hw.fan.speed_ratio` | Gauge | `1` | same | L M W | 30s | Portable across 2-fan laptops and 8-fan servers |
 | `hw.fan.speed.limit` | Gauge | `rpm` | + `hw.limit_type` | L M W | 300s | Denominator for the ratio when the OS does not provide it |
-| `hw.status` | UpDownCounter | `1` | `hw.type=fan\|temperature\|cpu`, `hw.state=ok\|degraded\|failed`, `hw.id` | L M W | 60s | The portable way to report "throttled" without inventing a metric (`hw.limit_type=throttled`) |
-| `hw.power` | Gauge | `W` | `hw.id`, `hw.type` | L M W | 30s | Package power tells whether the SoC is power-limited rather than thermally limited |
+| `hw.status` | UpDownCounter | `1` | `hw.id`, `hw.name`, `hw.parent`, `hw.type=fan\|temperature\|cpu`, `hw.state=ok\|degraded\|failed`, `hw.sensor_location` | L M W | 60s | The portable way to report "throttled" without inventing a metric (`hw.limit_type=throttled`) |
+| `hw.power` | Gauge | `W` | `hw.id`, `hw.name`, `hw.parent`, `hw.type` | L M W | 30s | Package power tells whether the SoC is power-limited rather than thermally limited |
 
 ## Workload attribution (answers "which agent did it?")
 

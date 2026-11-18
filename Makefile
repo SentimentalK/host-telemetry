@@ -12,7 +12,7 @@ lint:
 	test -z "$$(gofmt -l . | grep -v '^vendor/')" && $(GO) vet ./... && ./tools/no-literal-metric-names.sh
 
 budget:
-	$(GO) run ./cmd/budget --fixtures testdata
+	$(GO) run ./cmd/budget --fixtures testdata --platform linux
 
 print:
 	$(GO) run ./cmd/host-telemetry print

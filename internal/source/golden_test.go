@@ -82,27 +82,22 @@ func TestGolden(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	for _, platform := range platforms(t) {
 		t.Run(platform, func(t *testing.T) {
-			sources, err := fixtures.Load(testdataRoot)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var selected []source.Source
-			for _, src := range sources {
-				if strings.HasPrefix(src.Name(), platform) {
-					selected = append(selected, src)
-				}
-			}
-			if len(selected) != 1 {
-				t.Fatalf("%s: got %d sources", platform, len(selected))
-			}
-			c := collector.New(selected)
-			first := formatPoints(c.CollectOnce(context.Background()).Points)
-			second := formatPoints(c.CollectOnce(context.Background()).Points)
+			first := formatPoints(collectFresh(t, platform))
+			second := formatPoints(collectFresh(t, platform))
 			if first != second {
 				t.Errorf("%s: collect output differs between runs\n--- first ---\n%s--- second ---\n%s", platform, first, second)
 			}
 		})
 	}
+}
+
+func collectFresh(t *testing.T, platform string) []schema.Point {
+	t.Helper()
+	src, err := fixtures.LoadPlatform(testdataRoot, platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return collector.New([]source.Source{src}).CollectOnce(context.Background()).Points
 }
 
 func formatPoints(points []schema.Point) string {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -79,9 +80,23 @@ func build(docs []*document) (*model, error) {
 
 	for _, doc := range docs {
 		for _, ref := range doc.MetricRefinements {
-			if _, ok := m.metrics[ref.Ref]; !ok {
+			def, ok := m.metrics[ref.Ref]
+			if !ok {
 				return nil, fmt.Errorf("%s: metric_refinements: unknown metric %q", doc.Path, ref.Ref)
 			}
+			ids, err := m.expand(doc, ref.Attributes, nil)
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range ids {
+				if _, ok := m.attrs[id]; !ok {
+					return nil, fmt.Errorf("%s: metric_refinements %q: unknown attribute %q", doc.Path, ref.Ref, id)
+				}
+				if !slices.Contains(def.Attrs, id) {
+					def.Attrs = append(def.Attrs, id)
+				}
+			}
+			m.metrics[ref.Ref] = def
 		}
 	}
 

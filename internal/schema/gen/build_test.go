@@ -93,6 +93,39 @@ func TestBuildEnumFallback(t *testing.T) {
 	}
 }
 
+func TestBuildMetricRefinement(t *testing.T) {
+	doc := &document{
+		Path: "fan-metrics.yaml",
+		Attributes: []entry{
+			{ID: "hw.id"},
+			{ID: "hw.sensor_location"},
+		},
+		Metrics: []entry{{
+			Name:       "hw.status",
+			Instrument: "updowncounter",
+			Unit:       "1",
+			Attributes: []entry{{Ref: "hw.id"}},
+		}},
+		MetricRefinements: []entry{{
+			ID:  "metric.hw.fan.status",
+			Ref: "hw.status",
+			Attributes: []entry{
+				{Ref: "hw.sensor_location"},
+				{Ref: "hw.id"},
+			},
+		}},
+	}
+
+	m, err := build([]*document{doc})
+	if err != nil {
+		t.Fatalf("build() = %v", err)
+	}
+	want := []string{"hw.id", "hw.sensor_location"}
+	if got := m.metrics["hw.status"].Attrs; !reflect.DeepEqual(got, want) {
+		t.Errorf("hw.status attrs = %v, want %v", got, want)
+	}
+}
+
 func TestBuildDuplicateMetric(t *testing.T) {
 	first := &document{
 		Path:    "first.yaml",

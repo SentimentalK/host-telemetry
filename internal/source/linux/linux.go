@@ -240,7 +240,14 @@ func parseMeminfo(data []byte, file string) (map[string]float64, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: line %d: value %q: %w", file, i+1, fields[0], err)
 		}
-		if len(fields) > 1 && fields[1] == "kB" {
+		if strings.HasPrefix(key, "Mem") || strings.HasPrefix(key, "Swap") {
+			unit := ""
+			if len(fields) > 1 {
+				unit = fields[1]
+			}
+			if unit != "kB" {
+				return nil, fmt.Errorf("%s: line %d: unsupported unit %q: %s", file, i+1, unit, key)
+			}
 			value *= 1024
 		}
 		out[key] = value

@@ -20,11 +20,12 @@ const (
 	MaxRSS         = 80 << 20
 	MaxCPUFraction = 0.01
 
-	clockTicks   = 100
-	minMeasure   = 250 * time.Millisecond
-	unavailable  = "unavailable"
-	cpuStatPath  = "/proc/self/stat"
-	rssStatmPath = "/proc/self/statm"
+	clockTicks    = 100
+	minMeasure    = 250 * time.Millisecond
+	unavailable   = "unavailable"
+	cpuStatPath   = "/proc/self/stat"
+	rssStatmPath  = "/proc/self/statm"
+	rssStatusPath = "/proc/self/status"
 )
 
 type Report struct {
@@ -41,27 +42,38 @@ type Report struct {
 	cpuUntrusted bool
 }
 
-func Measure(ctx context.Context, sources []source.Source, iterations int) (Report, error) {
+func Measure(ctx context.Context, newSources func() ([]source.Source, error), iterations int) (Report, error) {
 	if iterations < 1 {
 		return Report{}, fmt.Errorf("budget: iterations must be at least 1, got %d", iterations)
 	}
-	col := collector.New(sources)
-	interval := minInterval(sources)
+	if newSources == nil {
+		return Report{}, fmt.Errorf("budget: nil source factory")
+	}
 
 	startTicks, cpuStartErr := readCPUTicks()
 	start := time.Now()
 	durations := make([]time.Duration, 0, iterations)
+	var interval time.Duration
 	for len(durations) < iterations || time.Since(start) < minMeasure {
 		if err := ctx.Err(); err != nil {
 			return Report{}, err
 		}
+		sources, err := newSources()
+		if err != nil {
+			return Report{}, fmt.Errorf("budget: source factory: %w", err)
+		}
+		current := minInterval(sources)
+		if current > 0 && (interval == 0 || current < interval) {
+			interval = current
+		}
+		col := collector.New(sources)
 		callStart := time.Now()
 		col.CollectOnce(ctx)
 		durations = append(durations, time.Since(callStart))
 	}
 	endTicks, cpuEndErr := readCPUTicks()
 
-	rss, rssSource := readRSS()
+	rss, rssSource := readRSSPeak()
 	report := Report{
 		Iterations:    len(durations),
 		CollectMedian: percentile(durations, 0.5),
@@ -105,9 +117,11 @@ func (r Report) Breaches() []string {
 		breaches = append(breaches, fmt.Sprintf("rss %d By exceeds limit %d By", r.RSSBytes, MaxRSS))
 	}
 	switch {
+	case r.CPUFraction < 0:
+		breaches = append(breaches, fmt.Sprintf("cpu measurement unavailable (source %s): 1%% budget not proven", r.CPUSource))
 	case r.cpuUntrusted:
 		breaches = append(breaches, fmt.Sprintf("cpu fraction %.4f outside [0,1], measurement untrusted (source %s)", r.CPUFraction, r.CPUSource))
-	case r.CPUFraction >= 0 && r.CPUFraction > MaxCPUFraction:
+	case r.CPUFraction > MaxCPUFraction:
 		breaches = append(breaches, fmt.Sprintf("cpu fraction %.4f exceeds limit %.4f", r.CPUFraction, MaxCPUFraction))
 	}
 	return breaches
@@ -115,9 +129,9 @@ func (r Report) Breaches() []string {
 
 func (r Report) String() string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "budget: iterations %d\n", r.Iterations)
+	fmt.Fprintf(&out, "budget: iterations %d; measurement=fresh source per iteration (parse+normalize included)\n", r.Iterations)
 	fmt.Fprintf(&out, "budget: collect median=%s p95=%s max=%s (limit %s)\n", r.CollectMedian, r.CollectP95, r.CollectMax, MaxCollect)
-	fmt.Fprintf(&out, "budget: rss=%s; limit %s; source %s\n", formatBytes(r.RSSBytes), formatBytes(MaxRSS), r.RSSSource)
+	fmt.Fprintf(&out, "budget: rss peak=%s; limit %s; source %s\n", formatBytes(r.RSSBytes), formatBytes(MaxRSS), r.RSSSource)
 	if r.CPUFraction < 0 {
 		fmt.Fprintf(&out, "budget: cpu=%s (limit %s; source %s; formula=cpu_per_collect/interval)\n", unavailable, formatPercent(MaxCPUFraction), r.CPUSource)
 		return out.String()
@@ -176,19 +190,34 @@ func readCPUTicks() (float64, error) {
 	return utime + stime, nil
 }
 
-func readRSS() (uint64, string) {
-	data, err := os.ReadFile(rssStatmPath)
-	if err == nil {
+func readRSSPeak() (uint64, string) {
+	if data, err := os.ReadFile(rssStatusPath); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if !strings.HasPrefix(line, "VmHWM:") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) < 2 {
+				break
+			}
+			kilobytes, err := strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				break
+			}
+			return kilobytes * 1024, rssStatusPath + " VmHWM"
+		}
+	}
+	if data, err := os.ReadFile(rssStatmPath); err == nil {
 		fields := strings.Fields(string(data))
 		if len(fields) >= 2 {
 			if pages, err := strconv.ParseUint(fields[1], 10, 64); err == nil {
-				return pages * uint64(os.Getpagesize()), rssStatmPath
+				return pages * uint64(os.Getpagesize()), rssStatmPath + " resident"
 			}
 		}
 	}
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	return stats.Sys, "runtime.MemStats"
+	return stats.Sys, "runtime.MemStats Sys"
 }
 
 func formatBytes(bytes uint64) string {
