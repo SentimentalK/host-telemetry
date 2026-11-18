@@ -1,0 +1,79 @@
+metrics:
+  - name: system.pressure.stall.time
+    source: adr-0002
+    instrument: counter
+    unit: "s"
+    attributes:
+      - ref: system.pressure.resource
+      - ref: system.pressure.type
+  - name: system.pressure.utilization
+    source: adr-0002
+    instrument: gauge
+    unit: "1"
+    attributes:
+      - ref: system.pressure.resource
+      - ref: system.pressure.type
+  - name: workload.count
+    source: readme-8
+    instrument: gauge
+    unit: "{workload}"
+    attributes: [{ref: workload.kind}, {ref: workload.state}]
+  - name: workload.cpu.time
+    source: readme-8
+    instrument: counter
+    unit: "s"
+    attributes: [{ref: workload.id}, {ref: workload.project}, {ref: cpu.mode}]
+  - name: workload.memory.usage
+    source: readme-8
+    instrument: updowncounter
+    unit: "By"
+    attributes: [{ref: workload.id}, {ref: workload.project}]
+  - name: workload.pressure.utilization
+    source: readme-8
+    instrument: gauge
+    unit: "1"
+    attributes: [{ref: workload.id}, {ref: system.pressure.resource}]
+  - name: collector.self.cpu.time
+    source: readme-5.4
+    instrument: counter
+    unit: "s"
+  - name: collector.self.memory.usage
+    source: readme-5.4
+    instrument: updowncounter
+    unit: "By"
+  - name: collector.wal.size
+    source: readme-5.4
+    instrument: gauge
+    unit: "By"
+  - name: collector.wal.dropped
+    source: readme-5.4
+    instrument: counter
+    unit: "{sample}"
+  - name: collector.send.queue.length
+    source: readme-5.4
+    instrument: gauge
+    unit: "{sample}"
+  - name: collector.scrape.duration
+    source: readme-5.4
+    instrument: gauge
+    unit: "s"
+  - name: collector.source.error
+    source: readme-12
+    instrument: counter
+    unit: "{error}"
+    attributes: [{ref: collector.source}]
+attributes:
+  - id: system.pressure.resource
+    type: {members: [{id: cpu}, {id: memory}, {id: io}]}
+  - id: system.pressure.type
+    type: {members: [{id: some}, {id: full}]}
+  - id: workload.kind
+    type: {members: [{id: agent}, {id: container}, {id: unit}]}
+  - id: workload.state
+    type: {members: [{id: working}, {id: blocked}, {id: done}]}
+  - id: workload.id
+    type: string
+  - id: workload.project
+    type: string
+  - id: collector.source
+    type: string

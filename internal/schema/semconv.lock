@@ -1,0 +1,16 @@
+version: v1.45.0
+files:
+  cpu/registry.yaml: 57afdaed98b8bca7da52fd1c3031032794f33b51fa7657e4f1241c7d699572ba
+  disk/registry.yaml: 3afbac209c133fef6704755259d51a927892635c4a877aca2a06efeed966bb05
+  error/registry.yaml: a19c84b4f378aa37abc02a82e7e92723222b0de081eb998a5edff40bf40c1c35
+  file/registry.yaml: 40cb073cab75bf2b202ae9a4a41add49fe346221cca7e6b2a3ebcae51ddb77ba
+  hardware/common-metrics.yaml: 7431128c5595625b0a5c984b4f29976e7885eb34d71c91c07c7e3141740b051d
+  hardware/common.yaml: b6fabe0f220c8d3476b3d2ca27b2fd1617629bbdee3a51c416394921685f410f
+  hardware/fan-metrics.yaml: 0dd328447dc1436bd8525463b859cc3428e6a1a36416fe800fc50270979aa469
+  hardware/registry.yaml: e8a84b7f5be231695aa2de0326dd7a1711b3a1491e816c2d12d6c658069f7dab
+  hardware/temperature-metrics.yaml: fc3f6cac989e59853506b1013d1de327128e2928641831b400dd2928e1b640e2
+  network/registry.yaml: 5c1a3afa879004b6b4284f539bf2c73a7f6d32b40de3729fb1545686f39eae41
+  process/metrics.yaml: b95b68c46a5acbaa433d611b082e8e90a31fa2b7c2708164387f7e7796576d24
+  process/registry.yaml: 65d911b08b64051185fe2572f45ecabb29fbe91d0d176a2f937ab064e0ff0bcb
+  system/metrics.yaml: aad86c4fb851d73e7b0e758f17c1ab7b3402e5d55cd6f5dde0f28b59aec29e0b
+  system/registry.yaml: 066e80626c3e4b4513be67f33ff4877639db630a03b1faf6bdb280a9f9e49eea
