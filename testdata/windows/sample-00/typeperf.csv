@@ -1,0 +1,3 @@
+"(PDH-CSV 4.0) (UTC)(0)","\\HOST\Processor(_Total)\% User Time","\\HOST\Processor(_Total)\% Privileged Time","\\HOST\Processor(_Total)\% Idle Time","\\HOST\Memory\Available Bytes","\\HOST\Memory\Committed Bytes"
+"11/18/2026 10:00:00.000","12.500000","8.250000","79.250000","8589934592.000000","4294967296.000000"
+"11/18/2026 10:00:15.000","13.750000","7.500000","78.750000","8489934592.000000","4394967296.000000"

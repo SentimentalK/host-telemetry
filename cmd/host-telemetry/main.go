@@ -1,13 +1,21 @@
 package main
 
 import (
+	"context"
+	"flag"
 	"fmt"
 	"io"
+	"log"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/SentimentalK/host-telemetry/internal/collector"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
+	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 )
 
 func main() {
@@ -22,6 +30,8 @@ func main() {
 			os.Exit(2)
 		}
 		printMetrics(os.Stdout)
+	case "run":
+		run(os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -29,7 +39,54 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: host-telemetry print")
+	fmt.Fprintln(os.Stderr, "usage: host-telemetry print|run [flags]")
+}
+
+func run(args []string) {
+	flags := flag.NewFlagSet("run", flag.ExitOnError)
+	fixturesDir := flags.String("fixtures", "testdata", "fixture root")
+	listen := flags.String("listen", "127.0.0.1:9101", "listen address")
+	if err := flags.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	sources, err := fixtures.Load(*fixturesDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
+		os.Exit(1)
+	}
+	col := collector.New(sources)
+	var mu sync.RWMutex
+	points := collect(col)
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			next := collect(col)
+			mu.Lock()
+			points = next
+			mu.Unlock()
+		}
+	}()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/metrics", collector.MetricsHandler(func() []schema.Point {
+		mu.RLock()
+		defer mu.RUnlock()
+		return points
+	}))
+	log.Printf("listening on %s", *listen)
+	if err := http.ListenAndServe(*listen, mux); err != nil {
+		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func collect(c *collector.Collector) []schema.Point {
+	result := c.CollectOnce(context.Background())
+	for _, sourceErr := range result.Errors {
+		log.Printf("source %s: %v", sourceErr.Source, sourceErr.Err)
+	}
+	return result.Points
 }
 
 func printMetrics(w io.Writer) {

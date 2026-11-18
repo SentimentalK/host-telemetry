@@ -1,0 +1,6 @@
+kern.hostname: MACHINE
+hw.memsize: 17179869184
+hw.logicalcpu: 10
+hw.physicalcpu: 8
+hw.ncpu: 10
+vm.swapusage: total = 2048.00M  used = 512.00M  free = 1536.00M  (encrypted)

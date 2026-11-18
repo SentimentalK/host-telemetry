@@ -1,6 +1,6 @@
 GO ?= go
 
-.PHONY: generate test lint print
+.PHONY: generate test lint print run
 
 generate:
 	GOFLAGS=-mod=vendor $(GO) run ./internal/schema/gen
@@ -13,3 +13,6 @@ lint:
 
 print:
 	$(GO) run ./cmd/host-telemetry print
+
+run:
+	$(GO) run ./cmd/host-telemetry run --fixtures testdata

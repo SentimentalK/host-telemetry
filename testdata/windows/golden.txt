@@ -1,0 +1,7 @@
+system.cpu.logical.count unit={cpu} value=16
+system.cpu.physical.count unit={cpu} value=8
+system.cpu.utilization{cpu.mode=idle} unit=1 value=0.7875
+system.cpu.utilization{cpu.mode=system} unit=1 value=0.075
+system.cpu.utilization{cpu.mode=user} unit=1 value=0.1375
+system.memory.usage{system.memory.state=available} unit=By value=8.489934592e+09
+system.memory.usage{system.memory.state=used} unit=By value=4.394967296e+09
