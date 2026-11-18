@@ -64,6 +64,14 @@ Off by default. When enabled, only whitelisted executables and their recursive c
 `process.top_n` (default 32) by memory. `process.pid` is high cardinality — it is for debugging, not
 for dashboards, and `workload.id` is always preferred over it.
 
+The Attributes column below lists only the attributes the pinned model declares **on the metric**.
+Per-process identity is an entity attribute set, not a metric attribute: `process.pid`,
+`process.parent_pid`, `process.command` and `process.command_line` are defined in the vendored
+`process/registry.yaml`, associated through `entity_associations: process` (`process/metrics.yaml`),
+and therefore travel as **resource** attributes on every series of these metrics. The `process`
+entity itself is upstream `model/process/entities.yaml`, not vendored yet; it lands with the M1
+process source on Linux.
+
 | Metric | Type | Unit | Attributes | Why |
 |---|---|---|---|---|
 | `process.cpu.time` / `process.cpu.utilization` | Counter / Gauge | `s` / `1` | `cpu.mode` | Per-agent CPU |
@@ -94,8 +102,5 @@ for dashboards, and `workload.id` is always preferred over it.
 3. If `cpu`: check `system.cpu.utilization`, then `process.context_switches{process.context_switch.type="involuntary"}`.
 4. If `io`: check `system.disk.operation_time / system.disk.operations` for latency, then per-workload `process.disk.io`.
 5. If none are elevated: the bottleneck is outside the host — rate limits, network, or waiting on a human. Check `workload.count{state="blocked"}` and the event stream.
-
-The pinned model attaches no `process.pid`/`process.command`/`process.parent_pid` attribute to
-`process.*` metrics; per-process identity needs an ADR plus a schema bump before it can be emitted.
 
 `/metrics` uses normalized sample names (dots to underscores, `_total` on counters); the OTel name and UCUM unit stay in the `# HELP` text — debug output, not the contract.
