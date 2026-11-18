@@ -401,7 +401,7 @@ func buildPoints(samples []sample, intervalSeconds float64) []schema.Point {
 		previous := samples[len(samples)-2]
 		for _, mode := range modes {
 			delta := last.cpu[mode] - previous.cpu[mode]
-			points = append(points, schema.NewPoint(schema.SystemCPUUtilization, delta/intervalSeconds, schema.Attr{Key: schema.AttrCPUMode, Value: mode}))
+			points = append(points, schema.NewPoint(schema.SystemCPUUtilization, delta/(intervalSeconds*last.logical), schema.Attr{Key: schema.AttrCPUMode, Value: mode}))
 		}
 	}
 	return points

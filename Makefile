@@ -15,4 +15,4 @@ print:
 	$(GO) run ./cmd/host-telemetry print
 
 run:
-	$(GO) run ./cmd/host-telemetry run --fixtures testdata
+	$(GO) run ./cmd/host-telemetry run --fixtures testdata --platform linux

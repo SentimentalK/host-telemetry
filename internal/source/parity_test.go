@@ -37,6 +37,13 @@ func TestCrossPlatformParity(t *testing.T) {
 				t.Errorf("%s: %s{%s} = %v outside [0,1]", platform, point.Name, formatAttrs(point.Attrs), point.Value)
 			}
 		}
+		sum := 0.0
+		for _, point := range utilizations {
+			sum += point.Value
+		}
+		if sum > 1.0+1e-9 {
+			t.Errorf("%s: sum of %s modes = %v, want <= 1", platform, schema.SystemCPUUtilization, sum)
+		}
 	}
 
 	for _, platform := range []string{"linux", "darwin"} {

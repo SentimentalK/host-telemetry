@@ -15,6 +15,7 @@ import (
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
+	"github.com/SentimentalK/host-telemetry/internal/source"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 )
 
@@ -45,16 +46,17 @@ func usage() {
 func run(args []string) {
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
 	fixturesDir := flags.String("fixtures", "testdata", "fixture root")
+	platform := flags.String("platform", "linux", "fixture platform")
 	listen := flags.String("listen", "127.0.0.1:9101", "listen address")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	sources, err := fixtures.Load(*fixturesDir)
+	src, err := fixtures.LoadPlatform(*fixturesDir, *platform)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
 		os.Exit(1)
 	}
-	col := collector.New(sources)
+	col := collector.New([]source.Source{src})
 	var mu sync.RWMutex
 	points := collect(col)
 	go func() {
