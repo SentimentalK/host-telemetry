@@ -24,7 +24,7 @@ var (
 
 func loadMachSymbols() (uintptr, uintptr, error) {
 	machOnce.Do(func() {
-		lib, err := purego.Dlopen("/usr/lib/libSystem.dylib", purego.RTLD_NOW)
+		lib, err := purego.Dlopen("/usr/lib/libSystem.B.dylib", purego.RTLD_NOW)
 		if err != nil {
 			machSymbolErr = fmt.Errorf("dlopen libSystem: %w", err)
 			return
@@ -65,6 +65,9 @@ func readCPUTicks() (CPUTicks, error) {
 	)
 	if int32(ret) != 0 {
 		return CPUTicks{}, fmt.Errorf("host_statistics: kern_return_t %d", int32(ret))
+	}
+	if count < cpuStateMax {
+		return CPUTicks{}, fmt.Errorf("host_statistics: count %d, want at least %d", count, cpuStateMax)
 	}
 	return CPUTicks{User: float64(ticks[0]), System: float64(ticks[1]), Idle: float64(ticks[2])}, nil
 }

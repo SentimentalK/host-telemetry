@@ -1,10 +1,20 @@
 package main
 
 import (
+	"runtime"
 	"testing"
 
 	"github.com/SentimentalK/host-telemetry/internal/schema"
 )
+
+func TestLoadSourcesRejectsMismatchedLivePlatform(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("mismatched live platform is only reachable on linux")
+	}
+	if _, err := loadSources("", "darwin", ""); err == nil {
+		t.Fatal("loadSources accepted darwin live collection on linux")
+	}
+}
 
 func TestSnapshotReplacesSourceSeries(t *testing.T) {
 	snapshot := newSnapshot()

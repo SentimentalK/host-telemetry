@@ -240,6 +240,9 @@ func loadSources(fixtureRoot, platform, sensors string) ([]source.Source, error)
 		}
 		return sources, nil
 	}
+	if platform != runtime.GOOS {
+		return nil, fmt.Errorf("live collection requires platform %s, running on %s", platform, runtime.GOOS)
+	}
 	switch platform {
 	case "linux":
 		return linux.NewLive(os.DirFS("/"), linux.Options{}), nil
