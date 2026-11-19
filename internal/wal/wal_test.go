@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -391,5 +393,171 @@ func TestPendingSinglePass(t *testing.T) {
 		if !bytes.Equal(batch.Payload, payload) {
 			t.Fatalf("batch %d payload mismatch", i)
 		}
+	}
+}
+
+func TestOpenExclusive(t *testing.T) {
+	dir := t.TempDir()
+	first, err := open(dir, 1<<20, 32<<10, 64<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := open(dir, 1<<20, 32<<10, 64<<10)
+	if err == nil {
+		second.Close()
+		t.Fatal("second open succeeded, want lock error")
+	}
+	if !strings.Contains(err.Error(), "locked by pid=") || !strings.Contains(err.Error(), strconv.Itoa(os.Getpid())) {
+		t.Fatalf("error = %v, want holder pid", err)
+	}
+	if _, err := first.Append(time.Unix(1, 0), 1, []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := open(dir, 1<<20, 32<<10, 64<<10)
+	if err != nil {
+		t.Fatalf("reopen after close: %v", err)
+	}
+	defer reopened.Close()
+	if reopened.PendingSamples() != 1 {
+		t.Fatalf("pending samples = %d, want 1", reopened.PendingSamples())
+	}
+}
+
+func TestReclaimKeepsReferencedSegments(t *testing.T) {
+	dir := t.TempDir()
+	store, err := open(dir, 1<<20, 32<<10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	payload := bytes.Repeat([]byte("p"), 4096)
+	var seqs []uint64
+	for i := 0; i < 24; i++ {
+		seq, err := store.Append(time.Unix(int64(i), 0), 1, payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seqs = append(seqs, seq)
+	}
+	if err := store.Ack(seqs[9]); err != nil {
+		t.Fatal(err)
+	}
+	read := 0
+	for {
+		batch, ok, err := store.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ok {
+			break
+		}
+		if batch.Seq <= seqs[9] {
+			t.Fatalf("Next returned acked batch %d", batch.Seq)
+		}
+		if err := store.Ack(batch.Seq); err != nil {
+			t.Fatal(err)
+		}
+		read++
+	}
+	if read != len(seqs)-10 {
+		t.Fatalf("read %d batches, want %d", read, len(seqs)-10)
+	}
+	if store.PendingSamples() != 0 {
+		t.Fatalf("pending samples = %d, want 0", store.PendingSamples())
+	}
+}
+
+func TestMissingSegmentHeals(t *testing.T) {
+	dir := t.TempDir()
+	store, err := open(dir, 1<<20, 32<<10, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	payload := bytes.Repeat([]byte("q"), 4096)
+	var seqs []uint64
+	for i := 0; i < 16; i++ {
+		seq, err := store.Append(time.Unix(int64(i), 0), 2, payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seqs = append(seqs, seq)
+	}
+	indexes, err := segmentIndexes(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexes) < 2 {
+		t.Fatalf("segments = %v, want at least 2", indexes)
+	}
+	victim := indexes[0]
+	if err := os.Remove(filepath.Join(dir, segmentName(victim))); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := 0
+	for {
+		batch, ok, err := store.Next()
+		if err != nil {
+			t.Fatalf("Next after missing segment: %v", err)
+		}
+		if !ok {
+			break
+		}
+		seen++
+		if err := store.Ack(batch.Seq); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if seen == 0 {
+		t.Fatal("Next returned nothing after healing")
+	}
+	if store.Dropped() == 0 {
+		t.Fatal("dropped = 0, want samples from the deleted segment")
+	}
+	if seen+int(store.Dropped()/2) != len(seqs) {
+		t.Fatalf("read=%d dropped=%d, want %d samples in total", seen, store.Dropped(), len(seqs)*2)
+	}
+	if _, err := store.Append(time.Unix(99, 0), 1, []byte("after")); err != nil {
+		t.Fatalf("append after missing segment: %v", err)
+	}
+}
+
+func TestOpenRefusesGappedDir(t *testing.T) {
+	dir := t.TempDir()
+	store, err := open(dir, 1<<20, 32<<10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("a"), 8192)
+	for i := 0; i < 8; i++ {
+		if _, err := store.Append(time.Unix(int64(i), 0), 1, payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	indexes, err := segmentIndexes(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexes) < 2 {
+		t.Fatalf("segments = %v, want at least 2", indexes)
+	}
+	last := indexes[len(indexes)-1]
+	if err := os.Rename(filepath.Join(dir, segmentName(last)), filepath.Join(dir, segmentName(last+2))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open(dir, 1<<20, 32<<10, 0); err == nil || !strings.Contains(err.Error(), "not sequential") {
+		t.Fatalf("open gapped dir error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, segmentName(last+2))); err != nil {
+		t.Fatalf("gapped segment removed by failed open: %v", err)
 	}
 }
