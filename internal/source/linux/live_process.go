@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,9 +17,7 @@ import (
 const processWorkers = 32
 
 type processSource struct {
-	root      fs.FS
-	whitelist []string
-	topN      int
+	root fs.FS
 }
 
 func (s *processSource) Name() string { return "linux-process" }
@@ -65,13 +62,10 @@ func (s *processSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	readers.Wait()
 
 	counts := make(map[string]int, 4)
-	pids := make([]string, 0, len(names))
-	for i, state := range states {
-		if state == "" {
-			continue
+	for _, state := range states {
+		if state != "" {
+			counts[state]++
 		}
-		counts[state]++
-		pids = append(pids, names[i])
 	}
 
 	var points []schema.Point
@@ -85,9 +79,6 @@ func (s *processSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	}
 	if limit, ok := s.readLimit(); ok {
 		points = append(points, schema.NewPoint(schema.SystemProcessLimit, limit))
-	}
-	if len(s.whitelist) > 0 {
-		points = append(points, s.memoryPoints(pids)...)
 	}
 	return points, nil
 }
@@ -140,43 +131,6 @@ func (s *processSource) readLimit() (float64, bool) {
 		return value, true
 	}
 	return 0, false
-}
-
-func (s *processSource) memoryPoints(pids []string) []schema.Point {
-	type resident struct {
-		pid   string
-		bytes float64
-	}
-	sizes := make([]resident, 0, len(pids))
-	for _, pid := range pids {
-		data, err := fs.ReadFile(s.root, "proc/"+pid+"/statm")
-		if err != nil {
-			continue
-		}
-		fields := strings.Fields(string(data))
-		if len(fields) < 2 {
-			continue
-		}
-		pages, err := strconv.ParseFloat(fields[1], 64)
-		if err != nil {
-			continue
-		}
-		sizes = append(sizes, resident{pid: pid, bytes: pages * 4096})
-	}
-	sort.Slice(sizes, func(i, j int) bool {
-		if sizes[i].bytes != sizes[j].bytes {
-			return sizes[i].bytes > sizes[j].bytes
-		}
-		return sizes[i].pid < sizes[j].pid
-	})
-	if len(sizes) > s.topN {
-		sizes = sizes[:s.topN]
-	}
-	points := make([]schema.Point, 0, len(sizes))
-	for _, size := range sizes {
-		points = append(points, schema.NewPoint(schema.ProcessMemoryUsage, size.bytes))
-	}
-	return points
 }
 
 var _ source.Source = (*processSource)(nil)

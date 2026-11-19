@@ -59,8 +59,6 @@ func run(args []string) {
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
 	fixturesDir := flags.String("fixtures", "", "fixture root; empty collects the live host")
 	platform := flags.String("platform", "linux", "fixture platform")
-	processWhitelist := flags.String("process-whitelist", "", "comma-separated process names for top-N memory series")
-	processTopN := flags.Int("process-top-n", 32, "top-N process memory series")
 	listen := flags.String("listen", "127.0.0.1:9101", "listen address")
 	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint; empty disables sending")
 	token := flags.String("token", "", "bearer token")
@@ -70,7 +68,7 @@ func run(args []string) {
 	}
 
 	start := time.Now()
-	sources, err := loadSources(*fixturesDir, *platform, *processWhitelist, *processTopN)
+	sources, err := loadSources(*fixturesDir, *platform)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
 		os.Exit(1)
@@ -173,7 +171,7 @@ func run(args []string) {
 	}
 }
 
-func loadSources(fixtureRoot, platform, whitelist string, topN int) ([]source.Source, error) {
+func loadSources(fixtureRoot, platform string) ([]source.Source, error) {
 	if fixtureRoot != "" {
 		src, err := fixtures.LoadPlatform(fixtureRoot, platform)
 		if err != nil {
@@ -184,17 +182,7 @@ func loadSources(fixtureRoot, platform, whitelist string, topN int) ([]source.So
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("live collection supports linux only, running on %s", runtime.GOOS)
 	}
-	return linux.NewLive(os.DirFS("/"), linux.Options{Whitelist: splitList(whitelist), TopN: topN}), nil
-}
-
-func splitList(text string) []string {
-	var out []string
-	for _, item := range strings.Split(text, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			out = append(out, item)
-		}
-	}
-	return out
+	return linux.NewLive(os.DirFS("/"), linux.Options{}), nil
 }
 
 func defaultWALDir() string {

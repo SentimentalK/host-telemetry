@@ -281,11 +281,11 @@ func parseDiskstats(data []byte, file string) (map[string]diskCounters, error) {
 		if len(fields) == 0 {
 			continue
 		}
-		if len(fields) < 10 {
-			return nil, fmt.Errorf("%s: line %d: want at least 10 fields, got %d", file, i+1, len(fields))
+		if len(fields) < 13 {
+			return nil, fmt.Errorf("%s: line %d: want at least 13 fields, got %d", file, i+1, len(fields))
 		}
-		values := make([]float64, 4)
-		for j, index := range []int{3, 5, 7, 9} {
+		values := make([]float64, 7)
+		for j, index := range []int{3, 5, 6, 7, 9, 10, 12} {
 			value, err := strconv.ParseFloat(fields[index], 64)
 			if err != nil {
 				return nil, fmt.Errorf("%s: line %d: field %d %q: %w", file, i+1, index+1, fields[index], err)
@@ -295,8 +295,11 @@ func parseDiskstats(data []byte, file string) (map[string]diskCounters, error) {
 		out[fields[2]] = diskCounters{
 			readOps:    values[0],
 			readBytes:  values[1] * 512,
-			writeOps:   values[2],
-			writeBytes: values[3] * 512,
+			writeOps:   values[3],
+			writeBytes: values[4] * 512,
+			readTime:   values[2] / 1000,
+			writeTime:  values[5] / 1000,
+			ioTime:     values[6] / 1000,
 		}
 	}
 	return out, nil
@@ -313,8 +316,8 @@ func parseNetDev(data []byte, file string) (map[string]netCounters, error) {
 		if len(fields) < 16 {
 			return nil, fmt.Errorf("%s: line %d: want 16 counters, got %d", file, i+1, len(fields))
 		}
-		values := make([]float64, 4)
-		for j, index := range []int{0, 2, 8, 10} {
+		values := make([]float64, 8)
+		for j, index := range []int{0, 1, 2, 3, 8, 9, 10, 11} {
 			value, err := strconv.ParseFloat(fields[index], 64)
 			if err != nil {
 				return nil, fmt.Errorf("%s: line %d: counter %q: %w", file, i+1, fields[index], err)
@@ -322,10 +325,14 @@ func parseNetDev(data []byte, file string) (map[string]netCounters, error) {
 			values[j] = value
 		}
 		out[strings.TrimSpace(name)] = netCounters{
-			rxBytes:  values[0],
-			rxErrors: values[1],
-			txBytes:  values[2],
-			txErrors: values[3],
+			rxBytes:   values[0],
+			rxPackets: values[1],
+			rxErrors:  values[2],
+			rxDropped: values[3],
+			txBytes:   values[4],
+			txPackets: values[5],
+			txErrors:  values[6],
+			txDropped: values[7],
 		}
 	}
 	return out, nil
@@ -350,13 +357,20 @@ type diskCounters struct {
 	readBytes  float64
 	writeOps   float64
 	writeBytes float64
+	readTime   float64
+	writeTime  float64
+	ioTime     float64
 }
 
 type netCounters struct {
-	rxBytes  float64
-	txBytes  float64
-	rxErrors float64
-	txErrors float64
+	rxBytes   float64
+	rxPackets float64
+	rxErrors  float64
+	rxDropped float64
+	txBytes   float64
+	txPackets float64
+	txErrors  float64
+	txDropped float64
 }
 
 func buildPoints(samples []sample, intervalSeconds float64) []schema.Point {

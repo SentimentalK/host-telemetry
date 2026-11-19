@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -104,6 +106,16 @@ func TestLivePartialFailure(t *testing.T) {
 			if point.Name == schema.SystemProcessLimit {
 				t.Errorf("emitted %s for an unlimited limit", schema.SystemProcessLimit)
 			}
+		}
+	})
+
+	t.Run("missing mountinfo", func(t *testing.T) {
+		dir := copyDump(t)
+		if err := os.Remove(filepath.Join(dir, "proc/self/mountinfo")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := collectSource(t, dir, "linux-filesystem"); err == nil {
+			t.Fatal("missing proc/self/mountinfo did not return an error")
 		}
 	})
 
@@ -306,5 +318,84 @@ func TestHwmonBadValueIsError(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	if _, err := src.Collect(context.Background()); err == nil {
 		t.Fatal("unparseable sensor value did not report an error")
+	}
+}
+
+func attrValue(points []schema.Point, name, key, value string) (float64, bool) {
+	for _, point := range points {
+		if point.Name != name {
+			continue
+		}
+		for _, attr := range point.Attrs {
+			if attr.Key == key && attr.Value == value {
+				return point.Value, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestInventoryPhysicalCount(t *testing.T) {
+	cpuinfo := ""
+	for processor := 0; processor < 8; processor++ {
+		id := processor / 4
+		cpuinfo += "processor\t: " + strconv.Itoa(processor) + "\n"
+		cpuinfo += "physical id\t: " + strconv.Itoa(id) + "\n"
+		cpuinfo += "cpu cores\t: 4\n\n"
+	}
+	stat := "cpu 1 1 1 1 1 1 1 1 0 0\n"
+	for cpu := 0; cpu < 8; cpu++ {
+		stat += "cpu" + strconv.Itoa(cpu) + " 1 1 1 1 1 1 1 1 0 0\n"
+	}
+	root := fstest.MapFS{
+		"proc/stat":    {Data: []byte(stat)},
+		"proc/meminfo": {Data: []byte("MemTotal: 1000 kB\nMemAvailable: 500 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n")},
+		"proc/cpuinfo": {Data: []byte(cpuinfo)},
+	}
+	src := findSource(t, linux.NewLive(root, linux.Options{}), "linux-inventory")
+	points, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("collect error: %v", err)
+	}
+	value, ok := metricValue(points, schema.SystemCPUPhysicalCount)
+	if !ok {
+		t.Fatalf("missing %s", schema.SystemCPUPhysicalCount)
+	}
+	if value != 8 {
+		t.Fatalf("%s = %v, want 8", schema.SystemCPUPhysicalCount, value)
+	}
+}
+
+func TestSystemUtilizationFormulas(t *testing.T) {
+	root := fstest.MapFS{
+		"proc/stat":            {Data: []byte("cpu 100 0 0 1000 0 0 0 0 0 0\ncpu0 50 0 0 500 0 0 0 0 0 0\ncpu1 50 0 0 500 0 0 0 0 0 0\nprocesses 10\n")},
+		"proc/meminfo":         {Data: []byte("MemTotal: 1000 kB\nMemAvailable: 500 kB\nSwapTotal: 0 kB\nSwapFree: 0 kB\n")},
+		"proc/pressure/memory": {Data: []byte("some avg10=25.00 avg60=0.00 avg300=0.00 total=5000000\n")},
+	}
+	at := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	src := findSource(t, linux.NewLive(root, linux.Options{Now: func() time.Time { return at }}), "linux-system")
+	if _, err := src.Collect(context.Background()); err != nil {
+		t.Fatalf("first collect error: %v", err)
+	}
+	root["proc/stat"] = &fstest.MapFile{Data: []byte("cpu 200 0 0 1000 0 0 0 0 0 0\ncpu0 100 0 0 500 0 0 0 0 0 0\ncpu1 100 0 0 500 0 0 0 0 0 0\nprocesses 10\n")}
+	at = at.Add(10 * time.Second)
+	points, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("second collect error: %v", err)
+	}
+	value, ok := attrValue(points, schema.SystemCPUUtilization, schema.AttrCPUMode, schema.CPUModeUser)
+	if !ok {
+		t.Fatalf("missing %s{%s=user}", schema.SystemCPUUtilization, schema.AttrCPUMode)
+	}
+	if math.Abs(value-0.05) > 1e-9 {
+		t.Errorf("%s{%s=user} = %v, want 0.05", schema.SystemCPUUtilization, schema.AttrCPUMode, value)
+	}
+	value, ok = attrValue(points, schema.SystemPressureUtilization, schema.AttrSystemPressureType, schema.SystemPressureTypeSome)
+	if !ok || math.Abs(value-0.25) > 1e-9 {
+		t.Errorf("%s{%s=some} = %v, want 0.25", schema.SystemPressureUtilization, schema.AttrSystemPressureType, value)
+	}
+	value, ok = attrValue(points, schema.SystemPressureStallTime, schema.AttrSystemPressureType, schema.SystemPressureTypeSome)
+	if !ok || math.Abs(value-5) > 1e-9 {
+		t.Errorf("%s{%s=some} = %v, want 5", schema.SystemPressureStallTime, schema.AttrSystemPressureType, value)
 	}
 }

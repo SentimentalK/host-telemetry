@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"strconv"
 	"strings"
 	"time"
 
@@ -47,42 +48,42 @@ func (s *inventorySource) Collect(ctx context.Context) ([]schema.Point, error) {
 		schema.NewPoint(schema.SystemMemoryLimit, mem["MemTotal"]),
 	}
 	if cpuinfo, err := fs.ReadFile(s.root, "proc/cpuinfo"); err == nil {
-		if physical := parsePhysicalCount(cpuinfo); physical > 0 {
+		if physical, ok := parsePhysicalCount(cpuinfo); ok && physical > 0 {
 			points = append(points, schema.NewPoint(schema.SystemCPUPhysicalCount, float64(physical)))
 		}
 	}
 	return points, nil
 }
 
-func parsePhysicalCount(data []byte) int {
-	pairs := make(map[string]bool)
-	physical := ""
-	cores := ""
-	flush := func() {
-		if physical != "" && cores != "" {
-			pairs[physical+"/"+cores] = true
-		}
-		physical = ""
-		cores = ""
-	}
+func parsePhysicalCount(data []byte) (int, bool) {
+	sockets := make(map[string]bool)
+	cores := make(map[string]bool)
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.TrimSpace(line) == "" {
-			flush()
-			continue
-		}
 		key, value, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
 		}
 		switch strings.TrimSpace(key) {
 		case "physical id":
-			physical = strings.TrimSpace(value)
+			sockets[strings.TrimSpace(value)] = true
 		case "cpu cores":
-			cores = strings.TrimSpace(value)
+			cores[strings.TrimSpace(value)] = true
 		}
 	}
-	flush()
-	return len(pairs)
+	perSocket := 0
+	for value := range cores {
+		number, err := strconv.Atoi(value)
+		if err == nil && number > perSocket {
+			perSocket = number
+		}
+	}
+	if perSocket == 0 {
+		return 0, false
+	}
+	if len(sockets) == 0 {
+		return perSocket, true
+	}
+	return len(sockets) * perSocket, true
 }
 
 var _ source.Source = (*inventorySource)(nil)

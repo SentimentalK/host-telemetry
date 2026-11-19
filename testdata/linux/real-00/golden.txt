@@ -25,7 +25,7 @@ system.cpu.frequency{cpu.logical_number=7} unit=Hz value=3.432226e+09
 system.cpu.frequency{cpu.logical_number=8} unit=Hz value=3.489633e+09
 system.cpu.frequency{cpu.logical_number=9} unit=Hz value=3.50676e+09
 system.cpu.logical.count unit={cpu} value=12
-system.cpu.physical.count unit={cpu} value=1
+system.cpu.physical.count unit={cpu} value=6
 system.cpu.time{cpu.mode=idle} unit=s value=4.19724715e+06
 system.cpu.time{cpu.mode=interrupt} unit=s value=7646.22
 system.cpu.time{cpu.mode=iowait} unit=s value=3488.88
@@ -176,8 +176,6 @@ system.network.packet.dropped{network.interface.name=wlo1,network.io.direction=r
 system.network.packet.dropped{network.interface.name=wlo1,network.io.direction=transmit} unit={packet} value=807
 system.paging.faults{system.paging.fault.type=major} unit={fault} value=1.0531475e+07
 system.paging.faults{system.paging.fault.type=minor} unit={fault} value=7.877816337e+09
-system.paging.operations{system.paging.direction=in,system.paging.fault.type=major} unit={operation} value=1.3668109e+07
-system.paging.operations{system.paging.direction=out,system.paging.fault.type=major} unit={operation} value=2.4180948e+07
 system.paging.usage{system.paging.state=free} unit=By value=6.749036544e+09
 system.paging.usage{system.paging.state=used} unit=By value=1.0430828544e+10
 system.pressure.stall.time{system.pressure.resource=cpu,system.pressure.type=some} unit=s value=40080.769042

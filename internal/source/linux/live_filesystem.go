@@ -2,6 +2,7 @@ package linux
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"strings"
 	"time"
@@ -22,7 +23,7 @@ func (s *filesystemSource) Interval() time.Duration { return interval }
 func (s *filesystemSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	data, err := fs.ReadFile(s.root, "proc/self/mountinfo")
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("proc/self/mountinfo: %w", err)
 	}
 	var points []schema.Point
 	for _, line := range strings.Split(string(data), "\n") {

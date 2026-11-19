@@ -9,10 +9,8 @@ import (
 )
 
 type Options struct {
-	Now       func() time.Time
-	Statfs    func(mountpoint string) (Statfs, error)
-	Whitelist []string
-	TopN      int
+	Now    func() time.Time
+	Statfs func(mountpoint string) (Statfs, error)
 }
 
 type Statfs struct {
@@ -29,14 +27,11 @@ func NewLive(root fs.FS, opts Options) []source.Source {
 	if opts.Statfs == nil {
 		opts.Statfs = readStatfs
 	}
-	if opts.TopN <= 0 {
-		opts.TopN = 32
-	}
 	return []source.Source{
 		&systemSource{root: root, now: opts.Now},
 		&uptimeSource{root: root},
 		&filesystemSource{root: root, statfs: opts.Statfs},
-		&processSource{root: root, whitelist: append([]string(nil), opts.Whitelist...), topN: opts.TopN},
+		&processSource{root: root},
 		&hwmonSource{root: root},
 		&inventorySource{root: root},
 	}
