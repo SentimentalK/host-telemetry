@@ -247,3 +247,28 @@ func TestUsageMismatchWarnsOnce(t *testing.T) {
 		t.Fatalf("logs for 1us mismatch = %q, want none", output.String())
 	}
 }
+
+func TestCPUUsageMismatchLogsOncePerScope(t *testing.T) {
+	dir := "cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/bad.scope/"
+	files := fstest.MapFS{
+		dir + "cgroup.events":  &fstest.MapFile{Data: []byte("populated 1\nfrozen 0\n")},
+		dir + "memory.current": &fstest.MapFile{Data: []byte("1024\n")},
+		dir + "cpu.stat":       &fstest.MapFile{Data: []byte("usage_usec 1000000\nuser_usec 100000\nsystem_usec 0\nnice_usec 0\n")},
+		dir + "cgroup.procs":   &fstest.MapFile{Data: []byte("")},
+	}
+	src := workload.New(files, fstest.MapFS{}, workload.Options{Cgroups: true})
+
+	var buf bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&buf)
+	defer log.SetOutput(previous)
+
+	for i := 0; i < 3; i++ {
+		if _, err := src.Collect(context.Background()); err != nil {
+			t.Fatalf("collect %d: %v", i, err)
+		}
+	}
+	if got := strings.Count(buf.String(), "usage_usec"); got != 1 {
+		t.Fatalf("log lines = %d, want 1:\n%s", got, buf.String())
+	}
+}

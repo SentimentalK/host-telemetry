@@ -148,7 +148,7 @@ func (s *workloadSource) scopePoints(scope cgroup.Scope) []schema.Point {
 	if diff < 0 {
 		diff = -diff
 	}
-	if diff > 1000 && !s.warned[scope.ID] {
+	if scope.CPU.Usage > 0 && diff*100 > int64(scope.CPU.Usage) && !s.warned[scope.ID] {
 		s.warned[scope.ID] = true
 		log.Printf("workload: cgroup %s usage_usec=%d != user+system+nice=%d",
 			scope.ID, scope.CPU.Usage, scope.CPU.User+scope.CPU.System+scope.CPU.Nice)
