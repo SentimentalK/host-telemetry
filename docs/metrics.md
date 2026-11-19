@@ -170,6 +170,11 @@ tracking the processes, so the series ends when the root process exits.
 `workload.count` is only aggregated by `workload.kind` and `workload.state`; per-workload series use
 the `workload.id` carried by `workload.memory.usage` and `workload.cpu.time`.
 
+`workload.id` identifies the cgroup scope, not the live process tree. A terminal's pty scope can
+outlive the agent process: Orca's per-session memory then drops to the shell (e.g. 6.5 MiB) while
+`memory.current` still includes pages charged to the scope until the terminal closes. Join on the
+scope id and only compare scope totals while the workload is running.
+
 ## Events (OTLP Logs)
 
 Events are OTLP log records, not metrics: they never enter the `/metrics` or OTLP metric streams.
