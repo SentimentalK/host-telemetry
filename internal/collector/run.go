@@ -42,8 +42,17 @@ func (c *Collector) runSource(ctx context.Context, src source.Source, stats *Sta
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			c.checkClock(src.Name())
 		}
 	}
+}
+
+func (c *Collector) checkClock(source string) {
+	skew, jumped := c.clock.Step()
+	if !jumped || c.Jump == nil {
+		return
+	}
+	c.Jump(source, skew)
 }
 
 func (c *Collector) collectSource(ctx context.Context, src source.Source, stats *Stats, sink func(source string, points []schema.Point, err error, d time.Duration)) {

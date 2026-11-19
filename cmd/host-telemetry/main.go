@@ -20,6 +20,7 @@ import (
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
 	"github.com/SentimentalK/host-telemetry/internal/config"
+	"github.com/SentimentalK/host-telemetry/internal/events"
 	"github.com/SentimentalK/host-telemetry/internal/hostinfo"
 	"github.com/SentimentalK/host-telemetry/internal/install"
 	"github.com/SentimentalK/host-telemetry/internal/otlp"
@@ -117,6 +118,18 @@ func run(args []string) {
 	pool.Sources = append(pool.Sources, collector.NewSelfSource(os.DirFS("/"), pool.Stats, walStats, start))
 	for _, src := range pool.Sources {
 		pool.Stats.Record(src.Name(), 0)
+	}
+
+	eventsPath := filepath.Join(install.Target{User: os.Geteuid() != 0}.StateDir(), "events.ndjson")
+	if err := os.MkdirAll(filepath.Dir(eventsPath), 0o700); err != nil {
+		log.Printf("events: %v", err)
+	}
+	eventLog := &events.Writer{Path: eventsPath}
+	pool.Jump = func(source string, skew time.Duration) {
+		if err := eventLog.Append(events.Event{Time: time.Now(), Name: events.ClockSkew, JumpMS: skew.Milliseconds()}); err != nil {
+			log.Printf("events: %v", err)
+		}
+		log.Printf("host.clock.skew source=%s jump=%s", source, skew)
 	}
 
 	root := os.DirFS("/")

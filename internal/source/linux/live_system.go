@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SentimentalK/host-telemetry/internal/rate"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
 	"github.com/SentimentalK/host-telemetry/internal/source"
 )
@@ -49,14 +50,12 @@ func (s *systemSource) Collect(ctx context.Context) ([]schema.Point, error) {
 		points = append(points, schema.NewPoint(schema.SystemCPUTime, cpu[mode], schema.Attr{Key: schema.AttrCPUMode, Value: mode}))
 	}
 	if s.prevCPU != nil {
-		if elapsed := now.Sub(s.prevAt).Seconds(); elapsed > 0 {
-			for _, mode := range modes {
-				delta := cpu[mode] - s.prevCPU[mode]
-				if delta < 0 {
-					delta = 0
-				}
-				points = append(points, schema.NewPoint(schema.SystemCPUUtilization, delta/(elapsed*logical), schema.Attr{Key: schema.AttrCPUMode, Value: mode}))
+		for _, mode := range modes {
+			value, ok := rate.Utilization(s.prevCPU[mode], cpu[mode], s.prevAt, now, logical)
+			if !ok {
+				continue
 			}
+			points = append(points, schema.NewPoint(schema.SystemCPUUtilization, value, schema.Attr{Key: schema.AttrCPUMode, Value: mode}))
 		}
 	}
 	s.prevCPU = cpu

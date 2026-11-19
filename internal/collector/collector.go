@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/SentimentalK/host-telemetry/internal/clockwatch"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
 	"github.com/SentimentalK/host-telemetry/internal/source"
 )
@@ -13,6 +14,9 @@ type Collector struct {
 	Sources []source.Source
 	Now     func() time.Time
 	Stats   *Stats
+	Jump    func(source string, skew time.Duration)
+
+	clock clockwatch.Watch
 }
 
 type Result struct {
@@ -26,7 +30,7 @@ type SourceError struct {
 }
 
 func New(sources []source.Source) *Collector {
-	return &Collector{Sources: sources, Now: time.Now, Stats: newStats()}
+	return &Collector{Sources: sources, Now: time.Now, Stats: newStats(), clock: clockwatch.Watch{Threshold: time.Second}}
 }
 
 func (c *Collector) CollectOnce(ctx context.Context) Result {
