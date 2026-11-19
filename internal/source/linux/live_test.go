@@ -2,13 +2,17 @@ package linux_test
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
+	"time"
 
 	"github.com/SentimentalK/host-telemetry/internal/schema"
+	"github.com/SentimentalK/host-telemetry/internal/source"
 	"github.com/SentimentalK/host-telemetry/internal/source/linux"
 )
 
@@ -148,4 +152,99 @@ func TestLivePartialFailure(t *testing.T) {
 			}
 		}
 	})
+}
+
+type testFS struct {
+	fs.FS
+	delay time.Duration
+	bad   string
+}
+
+func (t testFS) ReadFile(name string) ([]byte, error) {
+	time.Sleep(t.delay)
+	if name == t.bad {
+		return nil, fmt.Errorf("injected read failure")
+	}
+	return fs.ReadFile(t.FS, name)
+}
+
+func hwmonFixture() fstest.MapFS {
+	return fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":        {Data: []byte("fake\n")},
+		"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("42000\n")},
+	}
+}
+
+func findSource(t *testing.T, sources []source.Source, name string) source.Source {
+	t.Helper()
+	for _, src := range sources {
+		if src.Name() == name {
+			return src
+		}
+	}
+	t.Fatalf("no source named %q", name)
+	return nil
+}
+
+func metricValue(points []schema.Point, name string) (float64, bool) {
+	for _, point := range points {
+		if point.Name == name {
+			return point.Value, true
+		}
+	}
+	return 0, false
+}
+
+func TestHwmonBoundedWait(t *testing.T) {
+	src := findSource(t, linux.NewLive(testFS{FS: hwmonFixture(), delay: 50 * time.Millisecond}, linux.Options{}), "linux-hwmon")
+
+	start := time.Now()
+	points, err := src.Collect(context.Background())
+	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
+		t.Fatalf("first collect blocked for %s", elapsed)
+	}
+	if err != nil {
+		t.Fatalf("first collect error: %v", err)
+	}
+	if _, ok := metricValue(points, schema.HWTemperature); ok {
+		t.Fatal("first collect returned a snapshot before the background read finished")
+	}
+
+	time.Sleep(60 * time.Millisecond)
+
+	start = time.Now()
+	points, err = src.Collect(context.Background())
+	if elapsed := time.Since(start); elapsed > 10*time.Millisecond {
+		t.Fatalf("second collect blocked for %s", elapsed)
+	}
+	if err != nil {
+		t.Fatalf("second collect error: %v", err)
+	}
+	value, ok := metricValue(points, schema.HWTemperature)
+	if !ok {
+		t.Fatal("second collect did not return the background snapshot")
+	}
+	if value != 42 {
+		t.Fatalf("%s = %v, want 42", schema.HWTemperature, value)
+	}
+}
+
+func TestHwmonBackgroundError(t *testing.T) {
+	src := findSource(t, linux.NewLive(testFS{
+		FS:    hwmonFixture(),
+		delay: 20 * time.Millisecond,
+		bad:   "sys/class/hwmon/hwmon0/temp1_input",
+	}, linux.Options{}), "linux-hwmon")
+
+	if _, err := src.Collect(context.Background()); err != nil {
+		t.Fatalf("first collect error: %v", err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	points, err := src.Collect(context.Background())
+	if err == nil {
+		t.Fatal("second collect did not return the background read error")
+	}
+	if _, ok := metricValue(points, schema.HWTemperature); ok {
+		t.Fatal("failed read replaced the previous snapshot")
+	}
 }
