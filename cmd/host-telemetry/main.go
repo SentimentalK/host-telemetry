@@ -103,20 +103,58 @@ func run(args []string) {
 		*sensors = cfg.Sensors
 	}
 
+	opts := serveOptions{
+		Fixtures: *fixturesDir,
+		Platform: *platform,
+		Listen:   *listen,
+		Endpoint: *endpoint,
+		Token:    *token,
+		Sensors:  *sensors,
+		WALDir:   *walDir,
+		HostID:   cfg.HostID,
+		HostName: cfg.HostName,
+	}
+	if isWindowsService() {
+		if err := runWindowsService(opts); err != nil {
+			fatal(err)
+		}
+		return
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := serve(ctx, opts); err != nil {
+		fatal(err)
+	}
+}
+
+type serveOptions struct {
+	Fixtures string
+	Platform string
+	Listen   string
+	Endpoint string
+	Token    string
+	Sensors  string
+	WALDir   string
+	HostID   string
+	HostName string
+}
+
+func serve(ctx context.Context, opts serveOptions) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	start := time.Now()
-	sources, err := loadSources(*fixturesDir, *platform, *sensors)
+	sources, err := loadSources(opts.Fixtures, opts.Platform, opts.Sensors)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
 	var store *wal.Store
 	var walStats collector.WALStats
-	if *endpoint != "" {
-		store, err = wal.Open(*walDir, 256<<20)
+	if opts.Endpoint != "" {
+		store, err = wal.Open(opts.WALDir, 256<<20)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
-			os.Exit(1)
+			return err
 		}
 		walStats = store
 	}
@@ -140,16 +178,20 @@ func run(args []string) {
 	}
 
 	root := os.DirFS("/")
-	hostID := cfg.HostID
+	hostID := opts.HostID
 	if hostID == "" {
-		hostID, _ = hostinfo.MachineID(root)
+		if runtime.GOOS == "windows" {
+			hostID, _ = hostinfo.MachineGUID()
+		} else {
+			hostID, _ = hostinfo.MachineID(root)
+		}
 	}
-	hostName := cfg.HostName
+	hostName := opts.HostName
 	if hostName == "" {
 		hostName, _ = hostinfo.Name()
 	}
 	osType, osVersion, osDescription := hostinfo.OS(root)
-	if *fixturesDir == "" && runtime.GOOS == "darwin" {
+	if opts.Fixtures == "" && runtime.GOOS == "darwin" {
 		if version, description, err := hostinfo.DarwinOS(func(name string, args ...string) ([]byte, error) {
 			return exec.Command(name, args...).Output()
 		}); err == nil {
@@ -188,9 +230,6 @@ func run(args []string) {
 		}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
@@ -198,7 +237,7 @@ func run(args []string) {
 		pool.Run(ctx, sink)
 	}()
 	if store != nil {
-		client := &otlp.Client{Config: otlp.Config{Endpoint: *endpoint, Token: *token}}
+		client := &otlp.Client{Config: otlp.Config{Endpoint: opts.Endpoint, Token: opts.Token}}
 		transport := &sender.Sender{Store: store, Client: client}
 		workers.Add(1)
 		go func() {
@@ -209,17 +248,17 @@ func run(args []string) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", collector.MetricsHandler(snapshot.list))
-	server := &http.Server{Addr: *listen, Handler: mux}
+	server := &http.Server{Addr: opts.Listen, Handler: mux}
 	go func() {
 		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
 		_ = server.Shutdown(shutdownCtx)
 	}()
 
-	log.Printf("listening on %s", *listen)
+	log.Printf("listening on %s", opts.Listen)
 	serveErr := server.ListenAndServe()
-	stop()
+	cancel()
 	workers.Wait()
 	if store != nil {
 		if err := store.Close(); err != nil {
@@ -227,9 +266,9 @@ func run(args []string) {
 		}
 	}
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", serveErr)
-		os.Exit(1)
+		return serveErr
 	}
+	return nil
 }
 
 func loadSources(fixtureRoot, platform, sensors string) ([]source.Source, error) {
@@ -336,6 +375,8 @@ func resolveHostID(platform, override string) (string, error) {
 		return hostinfo.IOPlatformUUID(func(name string, args ...string) ([]byte, error) {
 			return exec.Command(name, args...).Output()
 		})
+	case "windows":
+		return hostinfo.MachineGUID()
 	default:
 		return "", fmt.Errorf("host.id is not available on platform %s", platform)
 	}
