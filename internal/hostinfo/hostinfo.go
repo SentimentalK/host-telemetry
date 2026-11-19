@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func ID(root fs.FS) (string, error) {
+func MachineID(root fs.FS) (string, error) {
 	for _, path := range []string{"etc/machine-id", "var/lib/dbus/machine-id"} {
 		data, err := fs.ReadFile(root, path)
 		if err != nil {

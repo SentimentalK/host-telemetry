@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
+	"github.com/SentimentalK/host-telemetry/internal/config"
 	"github.com/SentimentalK/host-telemetry/internal/hostinfo"
+	"github.com/SentimentalK/host-telemetry/internal/install"
 	"github.com/SentimentalK/host-telemetry/internal/otlp"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
 	"github.com/SentimentalK/host-telemetry/internal/sender"
@@ -45,6 +47,10 @@ func main() {
 		printMetrics(os.Stdout)
 	case "run":
 		run(os.Args[2:])
+	case "enroll":
+		provision("enroll", os.Args[2:])
+	case "install":
+		provision("install", os.Args[2:])
 	default:
 		usage()
 		os.Exit(2)
@@ -52,7 +58,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: host-telemetry print|run [flags]")
+	fmt.Fprintln(os.Stderr, "usage: host-telemetry print|run|enroll|install [flags]")
 }
 
 func run(args []string) {
@@ -63,8 +69,30 @@ func run(args []string) {
 	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint; empty disables sending")
 	token := flags.String("token", "", "bearer token")
 	walDir := flags.String("wal-dir", defaultWALDir(), "write-ahead log directory")
+	configPath := flags.String("config", defaultConfigPath(), "config file path")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
+	}
+
+	cfg, err := config.Load(*configPath)
+	if err != nil && !errors.Is(err, config.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
+		os.Exit(1)
+	}
+	cfg = cfg.WithEnv(os.Getenv)
+	set := make(map[string]bool)
+	flags.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if !set["listen"] && cfg.Listen != "" {
+		*listen = cfg.Listen
+	}
+	if !set["endpoint"] && cfg.Endpoint != "" {
+		*endpoint = cfg.Endpoint
+	}
+	if !set["token"] && cfg.Token != "" {
+		*token = cfg.Token
+	}
+	if !set["wal-dir"] && cfg.WALDir != "" {
+		*walDir = cfg.WALDir
 	}
 
 	start := time.Now()
@@ -92,8 +120,14 @@ func run(args []string) {
 	}
 
 	root := os.DirFS("/")
-	hostID, _ := hostinfo.ID(root)
-	hostName, _ := hostinfo.Name()
+	hostID := cfg.HostID
+	if hostID == "" {
+		hostID, _ = hostinfo.MachineID(root)
+	}
+	hostName := cfg.HostName
+	if hostName == "" {
+		hostName, _ = hostinfo.Name()
+	}
 	osType, osVersion, osDescription := hostinfo.OS(root)
 	resource := otlp.Resource{
 		HostID:         hostID,
@@ -186,14 +220,65 @@ func loadSources(fixtureRoot, platform string) ([]source.Source, error) {
 }
 
 func defaultWALDir() string {
-	if state := os.Getenv("XDG_STATE_HOME"); state != "" {
-		return filepath.Join(state, "host-telemetry", "wal")
+	return filepath.Join(install.Target{User: os.Geteuid() != 0}.StateDir(), "wal")
+}
+
+func defaultConfigPath() string {
+	return install.Target{User: os.Geteuid() != 0}.ConfigPath()
+}
+
+func provision(name string, args []string) {
+	flags := flag.NewFlagSet(name, flag.ExitOnError)
+	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint")
+	token := flags.String("token", "", "bearer token")
+	user := flags.Bool("user", false, "install a systemd user unit")
+	dryRun := flags.Bool("dry-run", false, "print actions without applying them")
+	if err := flags.Parse(args); err != nil {
+		os.Exit(2)
 	}
-	home, err := os.UserHomeDir()
+
+	hostID, err := hostinfo.MachineID(os.DirFS("/"))
 	if err != nil {
-		return filepath.Join(".host-telemetry", "wal")
+		fatal(err)
 	}
-	return filepath.Join(home, ".local", "state", "host-telemetry", "wal")
+	hostName, err := hostinfo.Name()
+	if err != nil {
+		fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		fatal(err)
+	}
+	if name == "install" && strings.Contains(executable, "/go-build") {
+		fmt.Fprintln(os.Stderr, "warning: ExecStart points at a go run temp binary; run install from an installed binary")
+	}
+	cfg := config.Config{
+		Endpoint: *endpoint,
+		Token:    *token,
+		HostID:   hostID,
+		HostName: hostName,
+	}
+	actions, err := install.Plan(install.Target{User: *user, Executable: executable}, cfg)
+	if err != nil {
+		fatal(err)
+	}
+	if name == "enroll" {
+		actions = actions[:1]
+	}
+	if *dryRun {
+		install.Render(os.Stdout, actions)
+		fmt.Printf("host.id=%s\n", hostID)
+		return
+	}
+	if err := install.Apply(actions); err != nil {
+		fatal(err)
+	}
+	fmt.Printf("host.id=%s\n", hostID)
+}
+
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
+	os.Exit(1)
 }
 
 type snapshot struct {

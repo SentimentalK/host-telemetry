@@ -1,0 +1,17 @@
+[Unit]
+Description=host-telemetry collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart={{ExecStart}} run --config {{ConfigPath}}
+Restart=always
+RestartSec=5
+MemoryMax=128M
+CPUQuota=2%
+ProtectSystem=strict
+NoNewPrivileges=yes
+ReadWritePaths={{StateDir}}
+
+[Install]
+WantedBy={{WantedBy}}

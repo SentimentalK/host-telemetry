@@ -17,17 +17,17 @@ func writeFile(t *testing.T, root, name, content string) {
 	}
 }
 
-func TestID(t *testing.T) {
+func TestMachineID(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "etc/machine-id", "  abc123\n")
-	id, err := ID(os.DirFS(root))
+	id, err := MachineID(os.DirFS(root))
 	if err != nil || id != "abc123" {
 		t.Fatalf("ID = %q, %v; want abc123", id, err)
 	}
 
 	fallback := t.TempDir()
 	writeFile(t, fallback, "var/lib/dbus/machine-id", "dbus456")
-	id, err = ID(os.DirFS(fallback))
+	id, err = MachineID(os.DirFS(fallback))
 	if err != nil || id != "dbus456" {
 		t.Fatalf("ID fallback = %q, %v; want dbus456", id, err)
 	}
@@ -35,12 +35,12 @@ func TestID(t *testing.T) {
 	empty := t.TempDir()
 	writeFile(t, empty, "etc/machine-id", "\n")
 	writeFile(t, empty, "var/lib/dbus/machine-id", "dbus789")
-	id, err = ID(os.DirFS(empty))
+	id, err = MachineID(os.DirFS(empty))
 	if err != nil || id != "dbus789" {
 		t.Fatalf("ID empty primary = %q, %v; want dbus789", id, err)
 	}
 
-	if _, err := ID(os.DirFS(t.TempDir())); err == nil {
+	if _, err := MachineID(os.DirFS(t.TempDir())); err == nil {
 		t.Fatal("ID with no files returned no error")
 	}
 }
