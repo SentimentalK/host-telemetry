@@ -9,6 +9,7 @@ Restart=always
 RestartSec=5
 MemoryMax=128M
 CPUQuota=2%
+CPUQuotaPeriodSec=1s
 ProtectSystem=strict
 NoNewPrivileges=yes
 ReadWritePaths={{StateDir}}

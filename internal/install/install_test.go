@@ -45,6 +45,7 @@ func TestPlanUser(t *testing.T) {
 		"RestartSec=5",
 		"MemoryMax=128M",
 		"CPUQuota=2%",
+		"CPUQuotaPeriodSec=1s",
 		"ProtectSystem=strict",
 		"NoNewPrivileges=yes",
 	} {
@@ -87,6 +88,11 @@ func TestPlanSystem(t *testing.T) {
 	}
 	if !strings.Contains(actions[1].Content, "WantedBy=multi-user.target") {
 		t.Fatalf("unit WantedBy wrong:\n%s", actions[1].Content)
+	}
+	for _, want := range []string{"CPUQuota=2%", "CPUQuotaPeriodSec=1s"} {
+		if !strings.Contains(actions[1].Content, want) {
+			t.Fatalf("system unit missing %q:\n%s", want, actions[1].Content)
+		}
 	}
 	if !strings.Contains(actions[1].Content, "ReadWritePaths=/var/lib/host-telemetry") {
 		t.Fatalf("unit ReadWritePaths wrong:\n%s", actions[1].Content)
