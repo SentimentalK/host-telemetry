@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/SentimentalK/host-telemetry/internal/schema"
@@ -124,14 +125,17 @@ func hwmonLess(a, b schema.Point) bool {
 }
 
 func (s *hwmonSource) load() ([]schema.Point, error) {
-	tasks := s.tasks()
+	tasks, err := s.tasks()
+	if err != nil {
+		return nil, err
+	}
 	raw, failures := s.readAll(tasks)
 	names := make(map[string]string)
 	var points []schema.Point
 	var errs []error
 	for i, task := range tasks {
 		if failed := failures[i]; failed != nil {
-			if task.kind == hwKindName || errors.Is(failed, fs.ErrNotExist) {
+			if task.kind == hwKindName || absentSensor(failed) {
 				continue
 			}
 			errs = append(errs, fmt.Errorf("%s: %w", task.path, failed))
@@ -148,6 +152,7 @@ func (s *hwmonSource) load() ([]schema.Point, error) {
 		}
 		value, err := strconv.ParseInt(text, 10, 64)
 		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", task.path, err))
 			continue
 		}
 		attrs := []schema.Attr{}
@@ -174,9 +179,17 @@ func (s *hwmonSource) load() ([]schema.Point, error) {
 	return points, errors.Join(errs...)
 }
 
-func (s *hwmonSource) tasks() []hwmonTask {
+func absentSensor(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) || errors.Is(err, syscall.ENODEV)
+}
+
+func (s *hwmonSource) tasks() ([]hwmonTask, error) {
 	var tasks []hwmonTask
-	if entries, err := fs.ReadDir(s.root, "sys/class/hwmon"); err == nil {
+	entries, err := fs.ReadDir(s.root, "sys/class/hwmon")
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("sys/class/hwmon: %w", err)
+	}
+	if err == nil {
 		for _, entry := range entries {
 			if !strings.HasPrefix(entry.Name(), "hwmon") {
 				continue
@@ -185,7 +198,10 @@ func (s *hwmonSource) tasks() []hwmonTask {
 			tasks = append(tasks, hwmonTask{path: dir + "/name", dir: entry.Name(), kind: hwKindName})
 			files, err := fs.ReadDir(s.root, dir)
 			if err != nil {
-				continue
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return nil, fmt.Errorf("%s: %w", dir, err)
 			}
 			for _, file := range files {
 				sensor := strings.TrimSuffix(file.Name(), "_input")
@@ -208,8 +224,12 @@ func (s *hwmonSource) tasks() []hwmonTask {
 			}
 		}
 	}
-	if entries, err := fs.ReadDir(s.root, "sys/devices/system/cpu"); err == nil {
-		for _, entry := range entries {
+	cpus, err := fs.ReadDir(s.root, "sys/devices/system/cpu")
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("sys/devices/system/cpu: %w", err)
+	}
+	if err == nil {
+		for _, entry := range cpus {
 			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), "cpu") {
 				continue
 			}
@@ -224,7 +244,7 @@ func (s *hwmonSource) tasks() []hwmonTask {
 			})
 		}
 	}
-	return tasks
+	return tasks, nil
 }
 
 func (s *hwmonSource) readAll(tasks []hwmonTask) ([][]byte, []error) {

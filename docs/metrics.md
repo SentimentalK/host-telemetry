@@ -39,7 +39,7 @@ mountpoint is skipped in M1.
 | `system.network.connection.count` | UpDownCounter | `{connection}` | `network.interface.name`, `network.transport=tcp`, `network.connection.state` | L M W | 15s | Connection storms from many agents |
 | `system.process.count` | UpDownCounter | `{process}` | `process.state=running\|sleeping\|stopped\|defunct` | L M W | 15s | Zombie/leak detection |
 | `system.process.created` | Counter | `{process}` | — | L M W | 15s | Fork storms (test runners, builds) |
-| `system.uptime` | Gauge | `s` | — | L M W | 15s | Proves the boot-install worked and detects unnoticed reboots |
+| `system.uptime` | Gauge | `s` | — | L M W | 4s | Proves the boot-install worked and detects unnoticed reboots; sampled on its own 4s source so a scrape at any moment is <5s from `/proc/uptime` |
 
 ## Hardware (answers "why did it get slow while idle?")
 

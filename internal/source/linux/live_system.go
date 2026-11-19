@@ -38,17 +38,13 @@ func (s *systemSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if err != nil {
 		return nil, err
 	}
-	uptime, err := readUptime(s.root)
-	if err != nil {
-		return nil, err
-	}
 	mem, err := readMeminfo(s.root)
 	if err != nil {
 		return nil, err
 	}
 
 	now := s.now()
-	points := []schema.Point{schema.NewPoint(schema.SystemUptime, uptime)}
+	points := []schema.Point{}
 	for _, mode := range modes {
 		points = append(points, schema.NewPoint(schema.SystemCPUTime, cpu[mode], schema.Attr{Key: schema.AttrCPUMode, Value: mode}))
 	}
@@ -374,3 +370,21 @@ func pressurePoints(root fs.FS) []schema.Point {
 }
 
 var _ source.Source = (*systemSource)(nil)
+
+type uptimeSource struct {
+	root fs.FS
+}
+
+func (s *uptimeSource) Name() string { return "linux-uptime" }
+
+func (s *uptimeSource) Interval() time.Duration { return 4 * time.Second }
+
+func (s *uptimeSource) Collect(ctx context.Context) ([]schema.Point, error) {
+	value, err := readUptime(s.root)
+	if err != nil {
+		return nil, err
+	}
+	return []schema.Point{schema.NewPoint(schema.SystemUptime, value)}, nil
+}
+
+var _ source.Source = (*uptimeSource)(nil)

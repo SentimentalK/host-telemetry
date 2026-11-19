@@ -34,6 +34,7 @@ func NewLive(root fs.FS, opts Options) []source.Source {
 	}
 	return []source.Source{
 		&systemSource{root: root, now: opts.Now},
+		&uptimeSource{root: root},
 		&filesystemSource{root: root, statfs: opts.Statfs},
 		&processSource{root: root, whitelist: append([]string(nil), opts.Whitelist...), topN: opts.TopN},
 		&hwmonSource{root: root},

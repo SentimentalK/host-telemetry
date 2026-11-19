@@ -156,13 +156,17 @@ func TestLivePartialFailure(t *testing.T) {
 
 type testFS struct {
 	fs.FS
-	delay time.Duration
-	bad   string
+	delay  time.Duration
+	bad    string
+	badErr error
 }
 
 func (t testFS) ReadFile(name string) ([]byte, error) {
 	time.Sleep(t.delay)
 	if name == t.bad {
+		if t.badErr != nil {
+			return nil, t.badErr
+		}
 		return nil, fmt.Errorf("injected read failure")
 	}
 	return fs.ReadFile(t.FS, name)
@@ -246,5 +250,61 @@ func TestHwmonBackgroundError(t *testing.T) {
 	}
 	if _, ok := metricValue(points, schema.HWTemperature); ok {
 		t.Fatal("failed read replaced the previous snapshot")
+	}
+}
+
+func hwmonSensorValue(points []schema.Point, name, id string) (float64, bool) {
+	for _, point := range points {
+		if point.Name != name {
+			continue
+		}
+		for _, attr := range point.Attrs {
+			if attr.Key == schema.AttrHWID && attr.Value == id {
+				return point.Value, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func TestHwmonSkipsAbsentSensor(t *testing.T) {
+	fixture := fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":        {Data: []byte("fake\n")},
+		"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("41000\n")},
+		"sys/class/hwmon/hwmon0/temp2_input": {Data: []byte("43000\n")},
+	}
+	src := findSource(t, linux.NewLive(testFS{
+		FS:     fixture,
+		bad:    "sys/class/hwmon/hwmon0/temp1_input",
+		badErr: fs.ErrNotExist,
+	}, linux.Options{}), "linux-hwmon")
+
+	if _, err := src.Collect(context.Background()); err != nil {
+		t.Fatalf("first collect error: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	points, err := src.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("absent sensor reported an error: %v", err)
+	}
+	if value, ok := hwmonSensorValue(points, schema.HWTemperature, "hwmon0/temp2"); !ok || value != 43 {
+		t.Fatalf("temp2 = %v (present %v), want 43", value, ok)
+	}
+	if _, ok := hwmonSensorValue(points, schema.HWTemperature, "hwmon0/temp1"); ok {
+		t.Fatal("absent sensor was emitted")
+	}
+}
+
+func TestHwmonBadValueIsError(t *testing.T) {
+	fixture := fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":        {Data: []byte("fake\n")},
+		"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("broken\n")},
+	}
+	src := findSource(t, linux.NewLive(testFS{FS: fixture}, linux.Options{}), "linux-hwmon")
+
+	_, _ = src.Collect(context.Background())
+	time.Sleep(20 * time.Millisecond)
+	if _, err := src.Collect(context.Background()); err == nil {
+		t.Fatal("unparseable sensor value did not report an error")
 	}
 }
