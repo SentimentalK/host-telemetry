@@ -230,6 +230,55 @@ func TestLegacyMissingHostStatisticsIsSilent(t *testing.T) {
 	}
 }
 
+func TestDarwinMemoryUtilizationWithinLimit(t *testing.T) {
+	cases := map[string]fstest.MapFS{
+		"real-synthetic": realSynthetic(t),
+		"sample-00":      singleSample(t, "sample-00"),
+	}
+	for name, samples := range cases {
+		t.Run(name, func(t *testing.T) {
+			points, err := collect(t, darwin.New(samples), "darwin-memory")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var sum float64
+			for _, point := range points {
+				if point.Name != schema.SystemMemoryUtilization {
+					continue
+				}
+				if point.Value < 0 || point.Value > 1 {
+					t.Errorf("%s%v = %v outside [0,1]", point.Name, point.Attrs, point.Value)
+				}
+				sum += point.Value
+			}
+			if sum > 1+1e-9 {
+				t.Errorf("sum of %s states = %v, want <= 1", schema.SystemMemoryUtilization, sum)
+			}
+		})
+	}
+}
+
+func singleSample(t *testing.T, name string) fstest.MapFS {
+	t.Helper()
+	disk := os.DirFS(filepath.Join(fixtureRoot, name))
+	entries, err := fs.ReadDir(disk, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples := fstest.MapFS{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := fs.ReadFile(disk, entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		samples[name+"/"+entry.Name()] = &fstest.MapFile{Data: data}
+	}
+	return samples
+}
+
 func countPoints(points []schema.Point, name string) int {
 	count := 0
 	for _, point := range points {
