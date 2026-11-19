@@ -15,35 +15,34 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `system.pressure.utilization` | Gauge | `1` | same as above | L | 15s | Kernel-maintained avg10/60/300 stall fraction; only `avg10` is emitted; the fastest way to answer "is it stalled now". **experimental** |
 | `system.cpu.utilization` | Gauge | `1` | `cpu.mode=user\|system\|nice\|idle\|iowait\|interrupt\|steal`, `cpu.logical_number` (opt-in) | L M W | 15s | Utilization alone cannot prove contention; keep it as the denominator next to PSI |
 | `system.cpu.time` | Counter | `s` | `cpu.mode`, `cpu.logical_number` | L M W | 15s | Rate source when the backend prefers counters |
-| `system.cpu.frequency` | Gauge | `Hz` | `cpu.logical_number` | L W | 30s | Frequency collapse at constant utilization = throttling |
+| `system.cpu.frequency` | Gauge | `Hz` | `cpu.logical_number` | L | 30s | Frequency collapse at constant utilization = throttling |
 | `system.cpu.logical.count` / `system.cpu.physical.count` | UpDownCounter | `{cpu}` | — | L M W | 300s | Normalizes every per-core metric across machines |
 | `system.memory.usage` | UpDownCounter | `By` | `system.memory.state=used\|available` | L M W | 15s | `available` (not `free`) is the only honest "how much is left" |
 | `system.memory.limit` | UpDownCounter | `By` | — | L M W | 300s | Denominator for utilization; changes on hot-plug |
 | `system.memory.utilization` | Gauge | `1` | `system.memory.state=used\|available` | L M W | 15s | Cheap alerting signal |
 | `system.paging.usage` | UpDownCounter | `By` | `system.paging.state=used\|free`, `system.device.name` | L M W | 15s | Swap in use; correlated with the first slow minute |
 | `system.paging.utilization` | Gauge | `1` | `system.paging.state=used\|free`, `system.device.name` | M | 15s | Swap in use as a fraction of used+free; the cheap thrash denominator |
-| `system.paging.operations` | Counter | `{operation}` | `system.paging.fault.type=major\|minor`, `system.paging.direction=in\|out` | L W | 15s | Major faults / swap-in rate is the actual thrash signal. **Not emitted in M1** — swap in/out `fault.type` semantics still need an ADR |
-| `system.paging.faults` | Counter | `{fault}` | `system.paging.fault.type=major\|minor` | L W | 15s | Distinguishes cold cache from real pressure |
+| `system.paging.operations` | Counter | `{operation}` | `system.paging.fault.type=major\|minor`, `system.paging.direction=in\|out` | — | 15s | Major faults / swap-in rate is the actual thrash signal. **Not emitted in M1** — swap in/out `fault.type` semantics still need an ADR |
+| `system.paging.faults` | Counter | `{fault}` | `system.paging.fault.type=major\|minor` | L | 15s | Distinguishes cold cache from real pressure |
 | `system.disk.io` | Counter | `By` | `disk.io.direction=read\|write`, `system.device.name` | L M W | 15s | Throughput, not latency |
 | `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device.name` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
-| `system.disk.io_time` | Counter | `s` | `system.device.name` | L W | 15s | Busy-time; the closest portable `%util` |
+| `system.disk.io_time` | Counter | `s` | `system.device.name` | L | 15s | Busy-time; the closest portable `%util` |
 | `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device.name` | L M W | 15s | Divide by operations for latency — the metric people actually need |
 | `system.filesystem.usage` | UpDownCounter | `By` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 15s | Disk-full is a classic silent failure |
 | `system.filesystem.utilization` | Gauge | `1` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 15s | Derived, but cheap to keep for alerts |
 
-Linux skips mounts whose `system.filesystem.type` is outside the pinned enum. macOS instead emits
-`system.filesystem.usage` / `system.filesystem.utilization` for those filesystems (APFS, btrfs, xfs,
-tmpfs, overlay, …) without the `system.filesystem.type` attribute; `hfs` maps to `hfsplus`, `exfat`
-to `exfat`, `msdos` to `fat32` and `ntfs` to `ntfs`. The platform divergence is known and tracked as
-HT-004.
+macOS emits `system.filesystem.usage` / `system.filesystem.utilization` for APFS and other types
+outside the pinned enum, and omits `system.filesystem.type`; `hfs` maps to `hfsplus`, `exfat` to
+`exfat`, `msdos` to `fat32` and `ntfs` to `ntfs`. Linux still skips such mounts. This is the HT-004
+design decision, not an unfinished item; unifying the two platforms requires a separate ADR.
 
 | `system.network.io` | Counter | `By` | `network.io.direction=receive\|transmit`, `network.interface.name` | L M W | 15s | "Big traffic came in" needs an interface-level denominator |
 | `system.network.errors` | Counter | `{error}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Hardware/driver trouble disguised as application slowness |
 | `system.network.packet.count` | Counter | `{packet}` | `system.device.name`, `network.io.direction=receive\|transmit` | L M W | 15s | Packet rate per device; many tiny packets look nothing like bulk bytes |
 | `system.network.packet.dropped` | Counter | `{packet}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Drops explain retransmit-shaped latency |
-| `system.network.connection.count` | UpDownCounter | `{connection}` | `network.interface.name`, `network.transport=tcp`, `network.connection.state` | L W | 15s | Connection storms from many agents |
+| `system.network.connection.count` | UpDownCounter | `{connection}` | `network.interface.name`, `network.transport=tcp`, `network.connection.state` | — | 15s | Connection storms from many agents |
 | `system.process.count` | UpDownCounter | `{process}` | `process.state=running\|sleeping\|stopped\|defunct` | L M W | 15s | Zombie/leak detection |
-| `system.process.created` | Counter | `{process}` | — | L W | 15s | Fork storms (test runners, builds) |
+| `system.process.created` | Counter | `{process}` | — | L | 15s | Fork storms (test runners, builds) |
 | `system.process.limit` | UpDownCounter | `{thread}` | — | L M W | 15s | Soft process/thread limit; the denominator for exhaustion (Linux: `Max processes`) |
 | `system.uptime` | Gauge | `s` | — | L M W | 4s | Proves the boot-install worked and detects unnoticed reboots; sampled on its own 4s source so a scrape at any moment is <5s from `/proc/uptime` |
 
@@ -52,11 +51,11 @@ HT-004.
 | Metric | Type | Unit | Attributes | Platform | Interval | Why it exists |
 |---|---|---|---|---|---|---|
 | `hw.temperature` | Gauge | `Cel` | `hw.id`, `hw.name`, `hw.sensor_location`, `hw.parent` | L M W | 30s | Context, not a diagnosis — always read next to frequency |
-| `hw.temperature.limit` | Gauge | `Cel` | + `hw.limit_type=high.critical\|high.degraded\|throttled` | L W | 30s | Gives a normalized distance-to-throttle |
+| `hw.temperature.limit` | Gauge | `Cel` | + `hw.limit_type=high.critical\|high.degraded\|throttled` | — | — | Gives a normalized distance-to-throttle |
 | `hw.fan.speed` | Gauge | `rpm` | `hw.id`, `hw.name`, `hw.sensor_location` | L M W | 30s | Fans pinned at max + falling frequency = thermal wall |
 | `hw.fan.speed_ratio` | Gauge | `1` | same | L M W | 30s | Portable across 2-fan laptops and 8-fan servers |
-| `hw.fan.speed.limit` | Gauge | `rpm` | + `hw.limit_type` | L M W | 30s | Denominator for the ratio when the OS does not provide it |
-| `hw.status` | UpDownCounter | `1` | `hw.id`, `hw.name`, `hw.parent`, `hw.type=fan\|temperature\|cpu`, `hw.state=ok\|degraded\|failed`, `hw.sensor_location` | L W | 30s | The portable way to report "throttled" without inventing a metric (`hw.limit_type=throttled`) |
+| `hw.fan.speed.limit` | Gauge | `rpm` | + `hw.limit_type` | M | 30s | Denominator for the ratio when the OS does not provide it |
+| `hw.status` | UpDownCounter | `1` | `hw.id`, `hw.name`, `hw.parent`, `hw.type=fan\|temperature\|cpu`, `hw.state=ok\|degraded\|failed`, `hw.sensor_location` | — | — | The portable way to report "throttled" without inventing a metric (`hw.limit_type=throttled`) |
 | `hw.power` | Gauge | `W` | `hw.id`, `hw.name`, `hw.parent`, `hw.type` | L M W | 30s | Package power tells whether the SoC is power-limited rather than thermally limited |
 
 Linux sysfs sensor reads (`temp*_input`, `fan*_input`, `power*_input`, `scaling_cur_freq`) run in
@@ -79,12 +78,15 @@ failure is reported on the next collection; the previous snapshot is kept. The f
 - `system.filesystem.usage` and `system.filesystem.utilization` are emitted for APFS and any other
   type outside the pinned enum, with the `system.filesystem.type` attribute omitted; `hfs` maps to
   `hfsplus`, `exfat` to `exfat`, `msdos` to `fat32` and `ntfs` to `ntfs`. Linux skips such mounts
-  instead — known inconsistency, tracked as HT-004.
+  instead; this is the HT-004 design decision, not an unfinished item.
 - `hw.temperature`, `hw.fan.speed`, `hw.fan.speed.limit`, `hw.fan.speed_ratio` and `hw.power` come
   from the optional `macmon` sub-source (`--sensors macmon`, off by default), with macmon field
   names normalized to the `hw.*` schema. When the sub-source is disabled the whole source is absent
   rather than reporting zeros, and no `collector.source.error` is emitted. `hw.temperature.limit`
   and `hw.status` are not emitted.
+- On macOS, `system.disk.io_time`, `system.network.connection.count`, `system.process.created`,
+  `hw.temperature.limit` and `hw.status` are absent because there is no corresponding semantic or
+  source, not because their value is zero; `hw.fan.speed.limit` comes only from macmon's `max_rpm`.
 - The darwin fixtures are synthetic and live collection has not been verified on real hardware; see
   `testdata/darwin/README.md` and HT-004 for fixture provenance and the remaining boundaries.
 
