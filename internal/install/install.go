@@ -9,9 +9,11 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/SentimentalK/host-telemetry/deploy/launchd"
 	"github.com/SentimentalK/host-telemetry/deploy/systemd"
+	"github.com/SentimentalK/host-telemetry/deploy/windows"
 	"github.com/SentimentalK/host-telemetry/internal/config"
 )
 
@@ -30,6 +32,7 @@ type Target struct {
 	XDGConfigHome string
 	XDGStateHome  string
 	Executable    string
+	ProgramData   string
 }
 
 type Action struct {
@@ -39,9 +42,13 @@ type Action struct {
 	Content     string
 	Command     []string
 	IgnoreError bool
+	Service     *winunit.Spec
 }
 
 func (t Target) ConfigPath() string {
+	if t.Platform == "windows" {
+		return t.windowsBase() + `\config.yaml`
+	}
 	if t.Platform == "darwin" {
 		return filepath.Join(t.darwinBase(), "config.yaml")
 	}
@@ -65,6 +72,9 @@ func (t Target) UnitPath() string {
 }
 
 func (t Target) StateDir() string {
+	if t.Platform == "windows" {
+		return t.windowsBase()
+	}
 	if t.Platform == "darwin" {
 		return t.darwinBase()
 	}
@@ -75,6 +85,9 @@ func (t Target) StateDir() string {
 }
 
 func (t Target) LogPath() string {
+	if t.Platform == "windows" {
+		return t.windowsBase() + `\host-telemetry.log`
+	}
 	return filepath.Join(t.darwinBase(), "host-telemetry.log")
 }
 
@@ -132,6 +145,20 @@ func (t Target) darwinBase() string {
 	return "/Library/Application Support/host-telemetry"
 }
 
+func (t Target) programData() string {
+	if t.ProgramData != "" {
+		return t.ProgramData
+	}
+	if data := os.Getenv("ProgramData"); data != "" {
+		return data
+	}
+	return `C:\ProgramData`
+}
+
+func (t Target) windowsBase() string {
+	return t.programData() + `\host-telemetry`
+}
+
 func (t Target) launchdDomain() string {
 	if !t.User {
 		return "system"
@@ -148,6 +175,9 @@ func Plan(t Target, cfg config.Config) ([]Action, error) {
 	if err != nil {
 		return nil, err
 	}
+	if t.Platform == "windows" {
+		return planWindows(t, data), nil
+	}
 	if t.Platform == "darwin" {
 		return planLaunchd(t, data), nil
 	}
@@ -157,6 +187,16 @@ func Plan(t Target, cfg config.Config) ([]Action, error) {
 		{Kind: "exec", Command: t.SystemctlArgs("daemon-reload")},
 		{Kind: "exec", Command: t.SystemctlArgs("enable", "--now", "host-telemetry")},
 	}, nil
+}
+
+func planWindows(t Target, data []byte) []Action {
+	spec := winunit.DefaultSpec(t.Executable, t.ConfigPath())
+	configPath := t.ConfigPath()
+	return []Action{
+		{Kind: "write", Path: configPath, Mode: "0600", Content: string(data)},
+		{Kind: "exec", Command: []string{"icacls", configPath, "/inheritance:r", "/grant:r", "*S-1-5-18:(F)", "*S-1-5-32-544:(F)"}},
+		{Kind: "service", Path: configPath, Service: &spec},
+	}
 }
 
 func planLaunchd(t Target, data []byte) []Action {
@@ -196,6 +236,13 @@ func Apply(actions []Action) error {
 			if err := write(action); err != nil {
 				return err
 			}
+		case "service":
+			if action.Service == nil {
+				return fmt.Errorf("install: service action has no spec")
+			}
+			if err := applyService(*action.Service); err != nil {
+				return err
+			}
 		case "exec":
 			cmd := exec.Command(action.Command[0], action.Command[1:]...)
 			cmd.Stdout = os.Stderr
@@ -218,6 +265,8 @@ func Render(w io.Writer, actions []Action) {
 			if !strings.HasSuffix(action.Content, "\n") {
 				fmt.Fprintln(w)
 			}
+		case "service":
+			renderService(w, action)
 		case "exec":
 			prefix := "exec"
 			if action.IgnoreError {
@@ -226,6 +275,43 @@ func Render(w io.Writer, actions []Action) {
 			fmt.Fprintf(w, "%s %s\n", prefix, strings.Join(action.Command, " "))
 		}
 	}
+}
+
+func renderService(w io.Writer, action Action) {
+	spec := action.Service
+	if spec == nil {
+		return
+	}
+	fmt.Fprintf(w, "service %s\n", spec.Name)
+	fmt.Fprintf(w, "  display-name %s\n", spec.DisplayName)
+	fmt.Fprintf(w, "  description %s\n", spec.Description)
+	fmt.Fprintf(w, "  binary %s\n", winunit.CommandLine(*spec))
+	fmt.Fprintf(w, "  start %s\n", spec.StartType)
+	fmt.Fprintf(w, "  dependencies %s\n", strings.Join(spec.Dependencies, ", "))
+	fmt.Fprintf(w, "  failure %s, reset %s\n", failureText(spec.FailureActions), durationText(spec.FailureReset))
+	fmt.Fprintf(w, "  config %s\n", action.Path)
+}
+
+func failureText(actions []winunit.FailureAction) string {
+	parts := make([]string, 0, len(actions))
+	for _, action := range actions {
+		verb := "none"
+		if action.Restart {
+			verb = "restart"
+		}
+		parts = append(parts, verb+" after "+durationText(action.Delay))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func durationText(d time.Duration) string {
+	if d >= time.Hour && d%time.Hour == 0 {
+		return strconv.FormatInt(int64(d/time.Hour), 10) + "h"
+	}
+	if d%time.Second == 0 {
+		return strconv.FormatInt(int64(d/time.Second), 10) + "s"
+	}
+	return d.String()
 }
 
 func write(action Action) error {

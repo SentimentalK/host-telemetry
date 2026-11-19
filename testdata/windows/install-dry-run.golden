@@ -1,0 +1,17 @@
+write C:\ProgramData\host-telemetry\config.yaml (0600)
+endpoint: http://127.0.0.1:8428/opentelemetry/api/v1/push
+token: test
+host_id: c32e69d5cb5c43ec914ddd62b271c773
+host_name: box
+listen: ""
+wal_dir: ""
+sensors: ""
+exec icacls C:\ProgramData\host-telemetry\config.yaml /inheritance:r /grant:r *S-1-5-18:(F) *S-1-5-32-544:(F)
+service host-telemetry
+  display-name host-telemetry
+  description Host telemetry collector: one schema for every OS.
+  binary "C:\Program Files\host-telemetry\host-telemetry.exe" run --config C:\ProgramData\host-telemetry\config.yaml
+  start auto
+  dependencies Tcpip
+  failure restart after 5s, restart after 15s, restart after 60s, reset 24h
+  config C:\ProgramData\host-telemetry\config.yaml
