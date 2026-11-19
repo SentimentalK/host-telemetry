@@ -22,11 +22,7 @@ func main() {
 
 	newSources := func() ([]source.Source, error) {
 		if *fixturesDir != "" {
-			src, err := fixtures.LoadPlatform(*fixturesDir, *platform)
-			if err != nil {
-				return nil, err
-			}
-			return []source.Source{src}, nil
+			return fixtures.LoadPlatform(*fixturesDir, *platform)
 		}
 		if runtime.GOOS != "linux" {
 			return nil, fmt.Errorf("live collection supports linux only, running on %s", runtime.GOOS)

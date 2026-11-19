@@ -7,16 +7,15 @@ import (
 	"testing"
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
-	"github.com/SentimentalK/host-telemetry/internal/source"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 )
 
 func TestSinglePlatformHasNoDuplicateSeries(t *testing.T) {
-	src, err := fixtures.LoadPlatform(testdataRoot, "linux")
+	sources, err := fixtures.LoadPlatform(testdataRoot, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := collector.New([]source.Source{src}).CollectOnce(context.Background())
+	result := collector.New(sources).CollectOnce(context.Background())
 	if len(result.Errors) != 0 {
 		t.Fatalf("collect errors: %v", result.Errors)
 	}

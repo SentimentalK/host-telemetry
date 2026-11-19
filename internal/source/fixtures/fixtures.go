@@ -22,11 +22,11 @@ func Load(root string) ([]source.Source, error) {
 			continue
 		}
 		name := entry.Name()
-		src, err := newSource(name, filepath.Join(root, name))
+		platformSources, err := newSources(name, filepath.Join(root, name))
 		if err != nil {
 			return nil, fmt.Errorf("%w in %s", err, root)
 		}
-		sources = append(sources, src)
+		sources = append(sources, platformSources...)
 	}
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("fixtures: no platform directories in %s", root)
@@ -34,18 +34,18 @@ func Load(root string) ([]source.Source, error) {
 	return sources, nil
 }
 
-func LoadPlatform(root, platform string) (source.Source, error) {
-	return newSource(platform, filepath.Join(root, platform))
+func LoadPlatform(root, platform string) ([]source.Source, error) {
+	return newSources(platform, filepath.Join(root, platform))
 }
 
-func newSource(platform, dir string) (source.Source, error) {
+func newSources(platform, dir string) ([]source.Source, error) {
 	switch platform {
 	case "linux":
-		return linux.New(os.DirFS(dir)), nil
+		return []source.Source{linux.New(os.DirFS(dir))}, nil
 	case "darwin":
 		return darwin.New(os.DirFS(dir)), nil
 	case "windows":
-		return windows.New(os.DirFS(dir)), nil
+		return []source.Source{windows.New(os.DirFS(dir))}, nil
 	default:
 		return nil, fmt.Errorf("fixtures: unknown platform %q", platform)
 	}

@@ -4,15 +4,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
-	"github.com/SentimentalK/host-telemetry/internal/source"
+	"github.com/SentimentalK/host-telemetry/internal/source/darwin"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 )
 
@@ -40,17 +42,14 @@ func platforms(t *testing.T) []string {
 
 func collectPlatform(t *testing.T, platform string) collector.Result {
 	t.Helper()
-	sources, err := fixtures.Load(testdataRoot)
+	sources, err := fixtures.LoadPlatform(testdataRoot, platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, src := range sources {
-		if strings.HasPrefix(src.Name(), platform) {
-			return collector.New([]source.Source{src}).CollectOnce(context.Background())
-		}
+	if len(sources) == 0 {
+		t.Fatalf("%s: no sources in %s/%s", platform, testdataRoot, platform)
 	}
-	t.Fatalf("%s: no source named %s-* in %s", platform, platform, testdataRoot)
-	return collector.Result{}
+	return collector.New(sources).CollectOnce(context.Background())
 }
 
 func TestGolden(t *testing.T) {
@@ -79,6 +78,46 @@ func TestGolden(t *testing.T) {
 	}
 }
 
+func TestGoldenLegacy(t *testing.T) {
+	dir := filepath.Join(testdataRoot, "darwin", "sample-00")
+	disk := os.DirFS(dir)
+	entries, err := fs.ReadDir(disk, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	samples := fstest.MapFS{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		data, err := fs.ReadFile(disk, entry.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		samples["sample-00/"+entry.Name()] = &fstest.MapFile{Data: data}
+	}
+
+	result := collector.New(darwin.New(samples)).CollectOnce(context.Background())
+	if len(result.Errors) != 0 {
+		t.Fatalf("legacy collect errors: %v", result.Errors)
+	}
+	got := formatPoints(result.Points)
+	path := filepath.Join(testdataRoot, "darwin", "golden-sample.txt")
+	if *updateGolden {
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (run go test ./internal/source -run TestGoldenLegacy -update)", err)
+	}
+	if got != string(want) {
+		t.Errorf("legacy golden mismatch\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+}
+
 func TestDeterminism(t *testing.T) {
 	for _, platform := range platforms(t) {
 		t.Run(platform, func(t *testing.T) {
@@ -93,11 +132,11 @@ func TestDeterminism(t *testing.T) {
 
 func collectFresh(t *testing.T, platform string) []schema.Point {
 	t.Helper()
-	src, err := fixtures.LoadPlatform(testdataRoot, platform)
+	sources, err := fixtures.LoadPlatform(testdataRoot, platform)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return collector.New([]source.Source{src}).CollectOnce(context.Background()).Points
+	return collector.New(sources).CollectOnce(context.Background()).Points
 }
 
 func formatPoints(points []schema.Point) string {

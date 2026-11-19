@@ -220,11 +220,7 @@ func run(args []string) {
 
 func loadSources(fixtureRoot, platform string) ([]source.Source, error) {
 	if fixtureRoot != "" {
-		src, err := fixtures.LoadPlatform(fixtureRoot, platform)
-		if err != nil {
-			return nil, err
-		}
-		return []source.Source{src}, nil
+		return fixtures.LoadPlatform(fixtureRoot, platform)
 	}
 	if runtime.GOOS != "linux" {
 		return nil, fmt.Errorf("live collection supports linux only, running on %s", runtime.GOOS)

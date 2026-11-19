@@ -11,7 +11,6 @@ import (
 	"testing/fstest"
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
-	"github.com/SentimentalK/host-telemetry/internal/source"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 	"github.com/SentimentalK/host-telemetry/internal/source/linux"
 )
@@ -51,11 +50,11 @@ func TestRenderedMetricsHaveRequiredNames(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.platform, func(t *testing.T) {
-			src, err := fixtures.LoadPlatform(testdataRoot, tc.platform)
+			sources, err := fixtures.LoadPlatform(testdataRoot, tc.platform)
 			if err != nil {
 				t.Fatal(err)
 			}
-			result := collector.New([]source.Source{src}).CollectOnce(context.Background())
+			result := collector.New(sources).CollectOnce(context.Background())
 			if len(result.Errors) != 0 {
 				t.Fatalf("%s: collect errors: %v", tc.platform, result.Errors)
 			}

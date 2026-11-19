@@ -1,0 +1,12 @@
+system.cpu.logical.count unit={cpu} value=10
+system.cpu.physical.count unit={cpu} value=8
+system.memory.limit unit=By value=1.7179869184e+10
+system.memory.usage{system.memory.state=available} unit=By value=2.3622320128e+10
+system.memory.usage{system.memory.state=used} unit=By value=2.3622320128e+10
+system.memory.utilization{system.memory.state=available} unit=1 value=1.375
+system.memory.utilization{system.memory.state=used} unit=1 value=1.375
+system.paging.usage{system.paging.state=free} unit=By value=1.610612736e+09
+system.paging.usage{system.paging.state=used} unit=By value=5.36870912e+08
+system.paging.utilization{system.paging.state=free} unit=1 value=0.75
+system.paging.utilization{system.paging.state=used} unit=1 value=0.25
+system.uptime unit=s value=12345

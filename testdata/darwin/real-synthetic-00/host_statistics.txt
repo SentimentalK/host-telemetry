@@ -1,0 +1,4 @@
+# synthetic host_statistics(HOST_CPU_LOAD_INFO)
+user_ticks: 600000
+system_ticks: 300000
+idle_ticks: 1200000
