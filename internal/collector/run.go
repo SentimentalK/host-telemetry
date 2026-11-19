@@ -10,6 +10,8 @@ import (
 	"github.com/SentimentalK/host-telemetry/internal/source"
 )
 
+const runStagger = 100 * time.Millisecond
+
 func (c *Collector) Run(ctx context.Context, sink func(source string, points []schema.Point, err error, d time.Duration)) {
 	stats := c.Stats
 	if stats == nil {
@@ -18,17 +20,26 @@ func (c *Collector) Run(ctx context.Context, sink func(source string, points []s
 	}
 
 	var wg sync.WaitGroup
-	for _, src := range c.Sources {
+	for index, src := range c.Sources {
 		wg.Add(1)
-		go func(src source.Source) {
+		go func(src source.Source, offset time.Duration) {
 			defer wg.Done()
-			c.runSource(ctx, src, stats, sink)
-		}(src)
+			c.runSource(ctx, src, stats, sink, offset)
+		}(src, time.Duration(index)*runStagger)
 	}
 	wg.Wait()
 }
 
-func (c *Collector) runSource(ctx context.Context, src source.Source, stats *Stats, sink func(source string, points []schema.Point, err error, d time.Duration)) {
+func (c *Collector) runSource(ctx context.Context, src source.Source, stats *Stats, sink func(source string, points []schema.Point, err error, d time.Duration), offset time.Duration) {
+	if offset > 0 {
+		timer := time.NewTimer(offset)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 	interval := src.Interval()
 	if interval <= 0 {
 		interval = 15 * time.Second
