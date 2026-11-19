@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -79,6 +80,7 @@ func run(args []string) {
 	workloadEnabled := flags.Bool("workload", false, "enable workload attribution")
 	workloadCgroups := flags.Bool("workload-cgroups", true, "read cgroup v2 scopes")
 	workloadExecutables := flags.String("workload-executables", "", "comma-separated process executable whitelist")
+	eventsDiskFullRatio := flags.Float64("events-disk-full-ratio", 0, "disk used ratio that emits host.disk.full")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -115,6 +117,9 @@ func run(args []string) {
 	if !set["workload-executables"] && cfg.Workload.Executables != nil {
 		*workloadExecutables = strings.Join(cfg.Workload.Executables, ",")
 	}
+	if !set["events-disk-full-ratio"] && cfg.Events.DiskFullRatio != 0 {
+		*eventsDiskFullRatio = cfg.Events.DiskFullRatio
+	}
 
 	opts := serveOptions{
 		Fixtures:            *fixturesDir,
@@ -129,6 +134,7 @@ func run(args []string) {
 		Workload:            *workloadEnabled,
 		WorkloadCgroups:     *workloadCgroups,
 		WorkloadExecutables: splitExecutables(*workloadExecutables),
+		EventsDiskFullRatio: *eventsDiskFullRatio,
 	}
 	if isWindowsService() {
 		if err := runWindowsService(opts); err != nil {
@@ -156,6 +162,7 @@ type serveOptions struct {
 	Workload            bool
 	WorkloadCgroups     bool
 	WorkloadExecutables []string
+	EventsDiskFullRatio float64
 }
 
 func splitExecutables(value string) []string {
@@ -209,13 +216,6 @@ func serve(ctx context.Context, opts serveOptions) error {
 	if err := os.MkdirAll(filepath.Dir(eventsPath), 0o700); err != nil {
 		log.Printf("events: %v", err)
 	}
-	eventLog := &events.Writer{Path: eventsPath}
-	pool.Jump = func(source string, skew time.Duration) {
-		if err := eventLog.Append(events.Event{Time: time.Now(), Name: events.ClockSkew, JumpMS: skew.Milliseconds()}); err != nil {
-			log.Printf("events: %v", err)
-		}
-		log.Printf("host.clock.skew source=%s jump=%s", source, skew)
-	}
 
 	root := os.DirFS("/")
 	hostID := opts.HostID
@@ -248,6 +248,21 @@ func serve(ctx context.Context, opts serveOptions) error {
 		ServiceName:    "host-telemetry",
 		ServiceVersion: ServiceVersion,
 		SchemaVersion:  schema.Version,
+	}
+
+	sinks := []events.Sink{&events.NDJSON{Path: eventsPath}}
+	if store != nil {
+		sinks = append(sinks, &events.OTLPSink{Store: store, Resource: resource})
+	}
+	pipeline := &events.Pipeline{Sinks: sinks, Logf: log.Printf}
+	pool.Jump = func(source string, skew time.Duration) {
+		pipeline.Emit(events.Event{
+			Time:    time.Now(),
+			Name:    events.ClockSkew,
+			Attrs:   []events.Attr{{Key: "jump_ms", Value: strconv.FormatInt(skew.Milliseconds(), 10)}},
+			Subject: "clock",
+		})
+		log.Printf("host.clock.skew source=%s jump=%s", source, skew)
 	}
 
 	snapshot := newSnapshot()
@@ -285,6 +300,27 @@ func serve(ctx context.Context, opts serveOptions) error {
 			transport.Run(ctx)
 		}()
 	}
+	if runtime.GOOS == "linux" {
+		detectors := events.LinuxDetectors(events.DetectorOptions{FS: os.DirFS("/"), DiskFullRatio: opts.EventsDiskFullRatio})
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case now := <-ticker.C:
+					for _, detector := range detectors {
+						for _, ev := range detector.Poll(now) {
+							pipeline.Emit(ev)
+						}
+					}
+				}
+			}
+		}()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/metrics", collector.MetricsHandler(snapshot.list))
@@ -300,6 +336,9 @@ func serve(ctx context.Context, opts serveOptions) error {
 	serveErr := server.ListenAndServe()
 	cancel()
 	workers.Wait()
+	if err := pipeline.Close(); err != nil {
+		log.Printf("events close: %v", err)
+	}
 	if store != nil {
 		if err := store.Close(); err != nil {
 			log.Printf("wal close: %v", err)

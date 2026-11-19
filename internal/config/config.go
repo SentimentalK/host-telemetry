@@ -22,6 +22,11 @@ type Config struct {
 	WALDir   string         `yaml:"wal_dir"`
 	Sensors  string         `yaml:"sensors"`
 	Workload WorkloadConfig `yaml:"workload,omitempty"`
+	Events   EventsConfig   `yaml:"events,omitempty"`
+}
+
+type EventsConfig struct {
+	DiskFullRatio float64 `yaml:"disk_full_ratio"`
 }
 
 type WorkloadConfig struct {
@@ -110,6 +115,11 @@ func (c Config) WithEnv(getenv func(string) string) Config {
 	}
 	if v := getenv("HT_WORKLOAD_EXECUTABLES"); v != "" {
 		c.Workload.Executables = splitList(v)
+	}
+	if v := getenv("HT_EVENTS_DISK_FULL_RATIO"); v != "" {
+		if ratio, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+			c.Events.DiskFullRatio = ratio
+		}
 	}
 	return c
 }

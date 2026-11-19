@@ -81,6 +81,25 @@ func TestWithEnvWorkload(t *testing.T) {
 	}
 }
 
+func TestWithEnvEvents(t *testing.T) {
+	base := Config{Events: EventsConfig{DiskFullRatio: 0.9}}
+	env := map[string]string{"HT_EVENTS_DISK_FULL_RATIO": "0.97"}
+	got := base.WithEnv(func(key string) string { return env[key] })
+	if got.Events.DiskFullRatio != 0.97 {
+		t.Fatalf("DiskFullRatio = %v, want 0.97", got.Events.DiskFullRatio)
+	}
+
+	got = base.WithEnv(func(key string) string {
+		if key == "HT_EVENTS_DISK_FULL_RATIO" {
+			return "not-a-number"
+		}
+		return ""
+	})
+	if got.Events.DiskFullRatio != 0.9 {
+		t.Fatalf("DiskFullRatio = %v, want 0.9", got.Events.DiskFullRatio)
+	}
+}
+
 func TestWorkloadCgroupsDefaultsToNil(t *testing.T) {
 	got := Config{}.WithEnv(func(string) string { return "" })
 	if got.Workload.Cgroups != nil {
