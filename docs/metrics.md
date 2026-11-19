@@ -117,8 +117,7 @@ failure is reported on the next collection; the previous snapshot is kept. The f
 | `\System\Processes` | 65536 | current process count (gauge) | `system.process.count` |
 
   `_Total` disk instances are skipped. When a PDH English counter is missing the whole group is
-  absent rather than an error. Paths are written unescaped; their Go/JSON string-literal form uses
-  `\\PhysicalDisk(*)\\Disk Read Bytes/sec` and `\\System\\Processes`.
+  absent rather than an error.
 - Collector restarts do not reset the counters: every collection reads the OS's cumulative total. An
   OS reboot resets them to zero, which must be handled as a counter reset; the collector does not
   compensate across the reboot, and `system.uptime` identifies it. 32-bit `PERF_COUNTER_COUNTER`
