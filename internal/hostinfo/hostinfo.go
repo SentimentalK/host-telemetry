@@ -30,7 +30,10 @@ func Arch() string {
 }
 
 func OS(root fs.FS) (typ, version, description string) {
-	typ = "linux"
+	typ = runtime.GOOS
+	if typ != "linux" {
+		return typ, "", ""
+	}
 	if data, err := fs.ReadFile(root, "proc/sys/kernel/osrelease"); err == nil {
 		version = strings.TrimSpace(string(data))
 	}

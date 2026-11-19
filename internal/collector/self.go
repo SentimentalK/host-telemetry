@@ -11,6 +11,12 @@ import (
 	"github.com/SentimentalK/host-telemetry/internal/source"
 )
 
+// userHZ is the kernel USER_HZ tick rate assumed for /proc/self/stat jiffies.
+const userHZ = 100
+
+// pageSize is the kernel page size assumed for /proc/self/statm resident pages.
+const pageSize = 4096
+
 type WALStats interface {
 	Size() int64
 	Dropped() uint64
@@ -83,7 +89,7 @@ func processCPUTime(procfs fs.FS) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return float64(user+system) / 100, true
+	return float64(user+system) / userHZ, true
 }
 
 func processMemory(procfs fs.FS) (float64, bool) {
@@ -99,5 +105,5 @@ func processMemory(procfs fs.FS) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return float64(resident * 4096), true
+	return float64(resident * pageSize), true
 }

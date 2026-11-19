@@ -15,14 +15,20 @@ import (
 )
 
 type stubSource struct {
-	name   string
-	points []schema.Point
-	err    error
+	name     string
+	points   []schema.Point
+	err      error
+	interval time.Duration
 }
 
 func (s stubSource) Name() string { return s.name }
 
-func (s stubSource) Interval() time.Duration { return time.Second }
+func (s stubSource) Interval() time.Duration {
+	if s.interval > 0 {
+		return s.interval
+	}
+	return time.Second
+}
 
 func (s stubSource) Collect(context.Context) ([]schema.Point, error) {
 	return s.points, s.err
@@ -126,6 +132,54 @@ func TestRunSchedulesSources(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not stop after cancellation")
+	}
+}
+
+func TestSourceErrorIsCumulative(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bad := stubSource{name: "always-bad", interval: 5 * time.Millisecond, err: errors.New("boom")}
+	good := stubSource{name: "always-good", interval: 5 * time.Millisecond, points: []schema.Point{schema.NewPoint(schema.SystemUptime, 1)}}
+	col := collector.New([]source.Source{bad, good})
+
+	type result struct {
+		name   string
+		points []schema.Point
+	}
+	results := make(chan result, 200)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		col.Run(ctx, func(name string, points []schema.Point, err error, d time.Duration) {
+			results <- result{name: name, points: points}
+		})
+	}()
+
+	values := map[string][]float64{}
+	for len(values["always-bad"]) < 2 || len(values["always-good"]) < 2 {
+		select {
+		case r := <-results:
+			point, ok := findPoint(r.points, schema.CollectorSourceError, schema.AttrCollectorSource, r.name)
+			if !ok {
+				t.Fatalf("source %s missing %s", r.name, schema.CollectorSourceError)
+			}
+			values[r.name] = append(values[r.name], point.Value)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for collections")
+		}
+	}
+	cancel()
+	<-done
+
+	badValues := values["always-bad"]
+	if badValues[0] != 1 || badValues[1] != 2 {
+		t.Fatalf("failing source errors = %v, want 1 then 2", badValues)
+	}
+	for i, value := range values["always-good"] {
+		if value != 0 {
+			t.Fatalf("healthy source error[%d] = %v, want 0", i, value)
+		}
 	}
 }
 

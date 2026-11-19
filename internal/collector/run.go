@@ -56,9 +56,10 @@ func (c *Collector) collectSource(ctx context.Context, src source.Source, stats 
 	stats.Record(src.Name(), elapsed)
 
 	if err != nil {
-		points = append(points, schema.NewPoint(schema.CollectorSourceError, 1,
-			schema.Attr{Key: schema.AttrCollectorSource, Value: src.Name()}))
+		stats.AddError(src.Name())
 	}
+	points = append(points, schema.NewPoint(schema.CollectorSourceError, float64(stats.errorCount(src.Name())),
+		schema.Attr{Key: schema.AttrCollectorSource, Value: src.Name()}))
 
 	valid := make([]schema.Point, 0, len(points))
 	var invalid error
