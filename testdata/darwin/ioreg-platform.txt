@@ -1,0 +1,15 @@
++-o IOPlatformExpertDevice  <class IOPlatformExpertDevice, id 0x100000100, registered, matched, active, busy 0 (0 ms), retain 9>
+    {
+      "IOPlatformSerialNumber" = "C02TEST0MD6M"
+      "IOPlatformUUID" = "C02A4B5C-1234-5E6F-8A9B-C0D1E2F34567"
+      "IOBusyInterest" = "IOCommand is not serializable"
+      "IOKitBuildVersion" = "Darwin Kernel Version 24.6.0"
+      "clock-frequency" = <00e1f50500>
+      "manufacturer" = <"Apple Inc.">
+      "model" = <"MacBookPro18,3">
+      "name" = <"MacBook Pro">
+      "platform-feature" = <0200000000000000>
+      "serial-number" = <43303254455354304d44364d0000000000000000>
+      "target-type" = <"Mac">
+      "version" = <"1.0">
+    }

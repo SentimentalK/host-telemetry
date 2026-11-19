@@ -9,12 +9,17 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/SentimentalK/host-telemetry/deploy/launchd"
 	"github.com/SentimentalK/host-telemetry/deploy/systemd"
 	"github.com/SentimentalK/host-telemetry/internal/config"
 )
 
+const launchdLabel = "dev.host-telemetry"
+
 type Target struct {
+	Platform      string
 	User          bool
+	UID           int
 	Home          string
 	Etc           string
 	XDGConfigHome string
@@ -31,6 +36,9 @@ type Action struct {
 }
 
 func (t Target) ConfigPath() string {
+	if t.Platform == "darwin" {
+		return filepath.Join(t.darwinBase(), "config.yaml")
+	}
 	if t.User {
 		return filepath.Join(t.configHome(), "host-telemetry", "config.yaml")
 	}
@@ -38,6 +46,12 @@ func (t Target) ConfigPath() string {
 }
 
 func (t Target) UnitPath() string {
+	if t.Platform == "darwin" {
+		if t.User {
+			return filepath.Join(t.home(), "Library", "LaunchAgents", launchdLabel+".plist")
+		}
+		return filepath.Join("/Library/LaunchDaemons", launchdLabel+".plist")
+	}
 	if t.User {
 		return filepath.Join(t.configHome(), "systemd", "user", "host-telemetry.service")
 	}
@@ -45,10 +59,17 @@ func (t Target) UnitPath() string {
 }
 
 func (t Target) StateDir() string {
+	if t.Platform == "darwin" {
+		return t.darwinBase()
+	}
 	if t.User {
 		return filepath.Join(t.stateHome(), "host-telemetry")
 	}
 	return "/var/lib/host-telemetry"
+}
+
+func (t Target) LogPath() string {
+	return filepath.Join(t.darwinBase(), "host-telemetry.log")
 }
 
 func (t Target) SystemctlArgs(args ...string) []string {
@@ -98,10 +119,31 @@ func (t Target) etc() string {
 	return "/etc"
 }
 
+func (t Target) darwinBase() string {
+	if t.User {
+		return filepath.Join(t.home(), "Library", "Application Support", "host-telemetry")
+	}
+	return "/Library/Application Support/host-telemetry"
+}
+
+func (t Target) launchdDomain() string {
+	if !t.User {
+		return "system"
+	}
+	uid := t.UID
+	if uid == 0 {
+		uid = os.Getuid()
+	}
+	return "gui/" + strconv.Itoa(uid)
+}
+
 func Plan(t Target, cfg config.Config) ([]Action, error) {
 	data, err := config.Marshal(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if t.Platform == "darwin" {
+		return planLaunchd(t, data), nil
 	}
 	return []Action{
 		{Kind: "write", Path: t.ConfigPath(), Mode: "0600", Content: string(data)},
@@ -111,6 +153,17 @@ func Plan(t Target, cfg config.Config) ([]Action, error) {
 	}, nil
 }
 
+func planLaunchd(t Target, data []byte) []Action {
+	domain := t.launchdDomain()
+	return []Action{
+		{Kind: "write", Path: t.ConfigPath(), Mode: "0600", Content: string(data)},
+		{Kind: "write", Path: t.UnitPath(), Mode: "0644", Content: renderPlist(t)},
+		{Kind: "exec", Command: []string{"launchctl", "bootstrap", domain, t.UnitPath()}},
+		{Kind: "exec", Command: []string{"launchctl", "enable", domain + "/" + launchdLabel}},
+		{Kind: "exec", Command: []string{"launchctl", "kickstart", "-k", domain + "/" + launchdLabel}},
+	}
+}
+
 func renderUnit(t Target) string {
 	return strings.NewReplacer(
 		"{{ExecStart}}", t.Executable,
@@ -118,6 +171,15 @@ func renderUnit(t Target) string {
 		"{{StateDir}}", t.StateDir(),
 		"{{WantedBy}}", t.WantedBy(),
 	).Replace(systemd.Template)
+}
+
+func renderPlist(t Target) string {
+	return strings.NewReplacer(
+		"{{Executable}}", t.Executable,
+		"{{ConfigPath}}", t.ConfigPath(),
+		"{{StateDir}}", t.StateDir(),
+		"{{LogPath}}", t.LogPath(),
+	).Replace(launchd.Template)
 }
 
 func Apply(actions []Action) error {

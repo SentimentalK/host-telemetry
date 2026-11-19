@@ -1,8 +1,10 @@
 package hostinfo
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +60,39 @@ func TestOS(t *testing.T) {
 	typ, version, description = OS(os.DirFS(t.TempDir()))
 	if typ != "linux" || version != "" || description != "" {
 		t.Fatalf("OS missing files = %q, %q, %q", typ, version, description)
+	}
+}
+
+func TestIOPlatformUUID(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", "darwin", "ioreg-platform.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotArgs []string
+	uuid, err := IOPlatformUUID(func(name string, args ...string) ([]byte, error) {
+		gotArgs = append([]string{name}, args...)
+		return data, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "C02A4B5C-1234-5E6F-8A9B-C0D1E2F34567"; uuid != want {
+		t.Fatalf("UUID = %q, want %q", uuid, want)
+	}
+	if want := "ioreg -rd1 -c IOPlatformExpertDevice"; strings.Join(gotArgs, " ") != want {
+		t.Fatalf("argv = %q, want %q", gotArgs, want)
+	}
+
+	for name, run := range map[string]func(string, ...string) ([]byte, error){
+		"empty output": func(string, ...string) ([]byte, error) { return nil, nil },
+		"missing key":  func(string, ...string) ([]byte, error) { return []byte(`"model" = <"MacBookPro18,3">`), nil },
+		"empty value":  func(string, ...string) ([]byte, error) { return []byte(`      "IOPlatformUUID" = ""`), nil },
+		"command fails": func(string, ...string) ([]byte, error) {
+			return nil, errors.New("ioreg: not found")
+		},
+	} {
+		if _, err := IOPlatformUUID(run); err == nil {
+			t.Fatalf("%s: no error", name)
+		}
 	}
 }

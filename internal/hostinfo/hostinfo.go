@@ -25,6 +25,34 @@ func Name() (string, error) {
 	return os.Hostname()
 }
 
+func IOPlatformUUID(run func(name string, args ...string) ([]byte, error)) (string, error) {
+	out, err := run("ioreg", "-rd1", "-c", "IOPlatformExpertDevice")
+	if err != nil {
+		return "", err
+	}
+	uuid, ok := parseIOPlatformUUID(string(out))
+	if !ok {
+		return "", errors.New("hostinfo: IOPlatformUUID not found")
+	}
+	return uuid, nil
+}
+
+func parseIOPlatformUUID(output string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != `"IOPlatformUUID"` {
+			continue
+		}
+		uuid := strings.Trim(strings.TrimSpace(value), `"`)
+		uuid = strings.TrimSpace(uuid)
+		if uuid == "" {
+			return "", false
+		}
+		return uuid, true
+	}
+	return "", false
+}
+
 func Arch() string {
 	return runtime.GOARCH
 }

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -267,11 +268,13 @@ func provision(name string, args []string) {
 	token := flags.String("token", "", "bearer token")
 	user := flags.Bool("user", false, "install a systemd user unit")
 	dryRun := flags.Bool("dry-run", false, "print actions without applying them")
+	platform := flags.String("platform", runtime.GOOS, "target platform")
+	hostIDOverride := flags.String("host-id", "", "override the resolved host id")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
 	}
 
-	hostID, err := hostinfo.MachineID(os.DirFS("/"))
+	hostID, err := resolveHostID(*platform, *hostIDOverride)
 	if err != nil {
 		fatal(err)
 	}
@@ -292,7 +295,7 @@ func provision(name string, args []string) {
 		HostID:   hostID,
 		HostName: hostName,
 	}
-	actions, err := install.Plan(install.Target{User: *user, Executable: executable}, cfg)
+	actions, err := install.Plan(install.Target{Platform: *platform, User: *user, Executable: executable}, cfg)
 	if err != nil {
 		fatal(err)
 	}
@@ -308,6 +311,22 @@ func provision(name string, args []string) {
 		fatal(err)
 	}
 	fmt.Printf("host.id=%s\n", hostID)
+}
+
+func resolveHostID(platform, override string) (string, error) {
+	if override != "" {
+		return override, nil
+	}
+	switch platform {
+	case "linux":
+		return hostinfo.MachineID(os.DirFS("/"))
+	case "darwin":
+		return hostinfo.IOPlatformUUID(func(name string, args ...string) ([]byte, error) {
+			return exec.Command(name, args...).Output()
+		})
+	default:
+		return "", fmt.Errorf("host.id is not available on platform %s", platform)
+	}
 }
 
 func fatal(err error) {
