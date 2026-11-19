@@ -16,9 +16,10 @@ import (
 )
 
 const (
-	MaxCollect     = 30 * time.Millisecond
-	MaxRSS         = 80 << 20
-	MaxCPUFraction = 0.01
+	MaxCollect       = 30 * time.Millisecond
+	MaxSourceCollect = 5 * time.Millisecond
+	MaxRSS           = 80 << 20
+	MaxCPUFraction   = 0.01
 
 	clockTicks    = 100
 	minMeasure    = 250 * time.Millisecond
@@ -92,6 +93,71 @@ func Measure(ctx context.Context, newSources func() ([]source.Source, error), it
 		report.cpuUntrusted = report.CPUFraction < 0 || report.CPUFraction > 1
 	}
 	return report, nil
+}
+
+type SourceReport struct {
+	Name   string
+	Median time.Duration
+	P95    time.Duration
+	Max    time.Duration
+}
+
+func (r SourceReport) Breaches() []string {
+	if r.Max > MaxSourceCollect {
+		return []string{fmt.Sprintf("source %s collect max %s exceeds limit %s", r.Name, r.Max, MaxSourceCollect)}
+	}
+	return nil
+}
+
+func (r SourceReport) String() string {
+	return fmt.Sprintf("budget: source %s median=%s p95=%s max=%s (limit %s)\n", r.Name, r.Median, r.P95, r.Max, MaxSourceCollect)
+}
+
+func MeasurePerSource(ctx context.Context, newSources func() ([]source.Source, error), iterations int) ([]SourceReport, error) {
+	if iterations < 1 {
+		return nil, fmt.Errorf("budget: iterations must be at least 1, got %d", iterations)
+	}
+	if newSources == nil {
+		return nil, fmt.Errorf("budget: nil source factory")
+	}
+	list, err := newSources()
+	if err != nil {
+		return nil, fmt.Errorf("budget: source factory: %w", err)
+	}
+	reports := make([]SourceReport, 0, len(list))
+	for _, src := range list {
+		name := src.Name()
+		durations := make([]time.Duration, 0, iterations)
+		for len(durations) < iterations {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			fresh, err := newSources()
+			if err != nil {
+				return nil, fmt.Errorf("budget: source factory: %w", err)
+			}
+			var current source.Source
+			for _, candidate := range fresh {
+				if candidate.Name() == name {
+					current = candidate
+					break
+				}
+			}
+			if current == nil {
+				return nil, fmt.Errorf("budget: source factory no longer returns %q", name)
+			}
+			start := time.Now()
+			_, _ = current.Collect(ctx)
+			durations = append(durations, time.Since(start))
+		}
+		reports = append(reports, SourceReport{
+			Name:   name,
+			Median: percentile(durations, 0.5),
+			P95:    percentile(durations, 0.95),
+			Max:    percentile(durations, 1),
+		})
+	}
+	return reports, nil
 }
 
 func minInterval(sources []source.Source) time.Duration {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ import (
 	"github.com/SentimentalK/host-telemetry/internal/sender"
 	"github.com/SentimentalK/host-telemetry/internal/source"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
+	"github.com/SentimentalK/host-telemetry/internal/source/linux"
 	"github.com/SentimentalK/host-telemetry/internal/wal"
 )
 
@@ -55,8 +57,10 @@ func usage() {
 
 func run(args []string) {
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
-	fixturesDir := flags.String("fixtures", "testdata", "fixture root")
+	fixturesDir := flags.String("fixtures", "", "fixture root; empty collects the live host")
 	platform := flags.String("platform", "linux", "fixture platform")
+	processWhitelist := flags.String("process-whitelist", "", "comma-separated process names for top-N memory series")
+	processTopN := flags.Int("process-top-n", 32, "top-N process memory series")
 	listen := flags.String("listen", "127.0.0.1:9101", "listen address")
 	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint; empty disables sending")
 	token := flags.String("token", "", "bearer token")
@@ -66,7 +70,7 @@ func run(args []string) {
 	}
 
 	start := time.Now()
-	fixture, err := fixtures.LoadPlatform(*fixturesDir, *platform)
+	sources, err := loadSources(*fixturesDir, *platform, *processWhitelist, *processTopN)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
 		os.Exit(1)
@@ -83,7 +87,7 @@ func run(args []string) {
 		walStats = store
 	}
 
-	pool := collector.New([]source.Source{fixture})
+	pool := collector.New(sources)
 	pool.Sources = append(pool.Sources, collector.NewSelfSource(os.DirFS("/"), pool.Stats, walStats, start))
 	for _, src := range pool.Sources {
 		pool.Stats.Record(src.Name(), 0)
@@ -167,6 +171,30 @@ func run(args []string) {
 		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", serveErr)
 		os.Exit(1)
 	}
+}
+
+func loadSources(fixtureRoot, platform, whitelist string, topN int) ([]source.Source, error) {
+	if fixtureRoot != "" {
+		src, err := fixtures.LoadPlatform(fixtureRoot, platform)
+		if err != nil {
+			return nil, err
+		}
+		return []source.Source{src}, nil
+	}
+	if runtime.GOOS != "linux" {
+		return nil, fmt.Errorf("live collection supports linux only, running on %s", runtime.GOOS)
+	}
+	return linux.NewLive(os.DirFS("/"), linux.Options{Whitelist: splitList(whitelist), TopN: topN}), nil
+}
+
+func splitList(text string) []string {
+	var out []string
+	for _, item := range strings.Split(text, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func defaultWALDir() string {

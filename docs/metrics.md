@@ -12,7 +12,7 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | Metric | Type | Unit | Attributes | Platform | Interval | Why it exists |
 |---|---|---|---|---|---|---|
 | `system.pressure.stall.time` | Counter | `s` | `system.pressure.resource=cpu\|memory\|io`, `system.pressure.type=some\|full` | L | 15s | Total stalled time. `full` > 0 means throughput was actually wasted. **experimental — see ADR 0002** |
-| `system.pressure.utilization` | Gauge | `1` | same as above | L | 15s | Kernel-maintained avg10/60/300 stall fraction; the fastest way to answer "is it stalled now". **experimental** |
+| `system.pressure.utilization` | Gauge | `1` | same as above | L | 15s | Kernel-maintained avg10/60/300 stall fraction; only `avg10` is emitted; the fastest way to answer "is it stalled now". **experimental** |
 | `system.cpu.utilization` | Gauge | `1` | `cpu.mode=user\|system\|nice\|idle\|iowait\|interrupt\|steal`, `cpu.logical_number` (opt-in) | L M W | 15s | Utilization alone cannot prove contention; keep it as the denominator next to PSI |
 | `system.cpu.time` | Counter | `s` | `cpu.mode`, `cpu.logical_number` | L M W | 15s | Rate source when the backend prefers counters |
 | `system.cpu.frequency` | Gauge | `Hz` | `cpu.logical_number` | L M W | 30s | Frequency collapse at constant utilization = throttling |
@@ -27,15 +27,19 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device.name` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
 | `system.disk.io_time` | Counter | `s` | `system.device.name` | L M W | 15s | Busy-time; the closest portable `%util` |
 | `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device.name` | L M W | 15s | Divide by operations for latency — the metric people actually need |
-| `system.filesystem.usage` | UpDownCounter | `By` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 60s | Disk-full is a classic silent failure |
-| `system.filesystem.utilization` | Gauge | `1` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 60s | Derived, but cheap to keep for alerts |
+| `system.filesystem.usage` | UpDownCounter | `By` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 15s | Disk-full is a classic silent failure |
+| `system.filesystem.utilization` | Gauge | `1` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 15s | Derived, but cheap to keep for alerts |
+
+Only mounts whose `system.filesystem.type` maps into the pinned enum are emitted; every other
+mountpoint is skipped in M1.
+
 | `system.network.io` | Counter | `By` | `network.io.direction=receive\|transmit`, `network.interface.name` | L M W | 15s | "Big traffic came in" needs an interface-level denominator |
 | `system.network.errors` | Counter | `{error}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Hardware/driver trouble disguised as application slowness |
 | `system.network.packet.dropped` | Counter | `{packet}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Drops explain retransmit-shaped latency |
 | `system.network.connection.count` | UpDownCounter | `{connection}` | `network.interface.name`, `network.transport=tcp`, `network.connection.state` | L M W | 15s | Connection storms from many agents |
 | `system.process.count` | UpDownCounter | `{process}` | `process.state=running\|sleeping\|stopped\|defunct` | L M W | 15s | Zombie/leak detection |
 | `system.process.created` | Counter | `{process}` | — | L M W | 15s | Fork storms (test runners, builds) |
-| `system.uptime` | Gauge | `s` | — | L M W | 60s | Proves the boot-install worked and detects unnoticed reboots |
+| `system.uptime` | Gauge | `s` | — | L M W | 15s | Proves the boot-install worked and detects unnoticed reboots |
 
 ## Hardware (answers "why did it get slow while idle?")
 
@@ -48,6 +52,12 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `hw.fan.speed.limit` | Gauge | `rpm` | + `hw.limit_type` | L M W | 300s | Denominator for the ratio when the OS does not provide it |
 | `hw.status` | UpDownCounter | `1` | `hw.id`, `hw.name`, `hw.parent`, `hw.type=fan\|temperature\|cpu`, `hw.state=ok\|degraded\|failed`, `hw.sensor_location` | L M W | 60s | The portable way to report "throttled" without inventing a metric (`hw.limit_type=throttled`) |
 | `hw.power` | Gauge | `W` | `hw.id`, `hw.name`, `hw.parent`, `hw.type` | L M W | 30s | Package power tells whether the SoC is power-limited rather than thermally limited |
+
+Linux sysfs sensor reads (`temp*_input`, `fan*_input`, `power*_input`, `scaling_cur_freq`) run in
+the background when `linux-hwmon` is collected: `Collect` waits at most 5 ms for the refresh and
+otherwise returns the previous snapshot, which is then at most one Interval old. A background read
+failure is reported on the next collection; the previous snapshot is kept. The first `hw.*` and
+`system.cpu.frequency` data point therefore appears at the first 30 s tick.
 
 ## Workload attribution (answers "which agent did it?")
 
