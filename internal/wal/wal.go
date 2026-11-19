@@ -20,9 +20,11 @@ import (
 const (
 	recordMagic        = "HTW1"
 	recordHeaderSize   = 28
-	defaultSegmentSize = 128 << 20
+	defaultSegmentSize = 4 << 20
 	cursorName         = "cursor"
 )
+
+var errFound = errors.New("wal: record found")
 
 type Batch struct {
 	Seq     uint64
@@ -31,14 +33,23 @@ type Batch struct {
 	Payload []byte
 }
 
+type record struct {
+	seq     uint64
+	samples int
+	at      int64
+	seg     int
+}
+
 type Store struct {
-	mu       sync.Mutex
-	dir      string
-	maxBytes int64
-	wl       *wlog.WL
-	cursor   uint64
-	next     uint64
-	dropped  uint64
+	mu             sync.Mutex
+	dir            string
+	maxBytes       int64
+	wl             *wlog.WL
+	cursor         uint64
+	next           uint64
+	dropped        uint64
+	pendingSamples int
+	records        []record
 }
 
 func Open(dir string, maxBytes int64) (*Store, error) {
@@ -68,9 +79,13 @@ func open(dir string, maxBytes int64, segmentSize int) (*Store, error) {
 	}
 	store := &Store{dir: dir, maxBytes: maxBytes, wl: writer, cursor: cursor, next: cursor + 1}
 	for _, index := range existing {
-		err := scanSegment(dir, index, func(seq uint64, _ int64, _ int, _ []byte) error {
+		err := scanSegment(dir, index, func(seq uint64, at int64, samples int, _ []byte) error {
 			if seq >= store.next {
 				store.next = seq + 1
+			}
+			if seq > store.cursor {
+				store.records = append(store.records, record{seq: seq, samples: samples, at: at, seg: index})
+				store.pendingSamples += samples
 			}
 			return nil
 		})
@@ -90,47 +105,83 @@ func (s *Store) Append(at time.Time, samples int, payload []byte) (uint64, error
 	defer s.mu.Unlock()
 
 	seq := s.next
-	record := make([]byte, recordHeaderSize+len(payload))
-	copy(record, recordMagic)
-	binary.BigEndian.PutUint64(record[4:], seq)
-	binary.BigEndian.PutUint64(record[12:], uint64(at.UnixNano()))
-	binary.BigEndian.PutUint32(record[20:], uint32(samples))
-	binary.BigEndian.PutUint32(record[24:], uint32(len(payload)))
-	copy(record[recordHeaderSize:], payload)
+	encoded := make([]byte, recordHeaderSize+len(payload))
+	copy(encoded, recordMagic)
+	binary.BigEndian.PutUint64(encoded[4:], seq)
+	binary.BigEndian.PutUint64(encoded[12:], uint64(at.UnixNano()))
+	binary.BigEndian.PutUint32(encoded[20:], uint32(samples))
+	binary.BigEndian.PutUint32(encoded[24:], uint32(len(payload)))
+	copy(encoded[recordHeaderSize:], payload)
 
-	if err := s.wl.Log(record); err != nil {
+	if err := s.wl.Log(encoded); err != nil {
 		return 0, fmt.Errorf("wal: append: %w", err)
 	}
+	seg, _, err := s.wl.LastSegmentAndOffset()
+	if err != nil {
+		return 0, fmt.Errorf("wal: locate segment: %w", err)
+	}
 	s.next++
+	s.records = append(s.records, record{seq: seq, samples: samples, at: at.UnixNano(), seg: seg})
+	s.pendingSamples += samples
 	s.evict()
 	return seq, nil
 }
 
-func (s *Store) Pending() []Batch {
+func (s *Store) Next() (Batch, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.nextLocked(s.cursor)
+}
+
+func (s *Store) Pending() ([]Batch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	indexes, err := segmentIndexes(s.dir)
-	if err != nil {
-		return nil
-	}
 	var batches []Batch
-	for _, index := range indexes {
-		_ = scanSegment(s.dir, index, func(seq uint64, at int64, samples int, payload []byte) error {
-			if seq <= s.cursor {
-				return nil
-			}
-			batches = append(batches, Batch{
-				Seq:     seq,
-				At:      time.Unix(0, at),
-				Samples: samples,
-				Payload: append([]byte(nil), payload...),
-			})
-			return nil
-		})
+	after := s.cursor
+	for {
+		batch, ok, err := s.nextLocked(after)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return batches, nil
+		}
+		batches = append(batches, batch)
+		after = batch.Seq
 	}
-	sort.Slice(batches, func(i, j int) bool { return batches[i].Seq < batches[j].Seq })
-	return batches
+}
+
+func (s *Store) nextLocked(after uint64) (Batch, bool, error) {
+	i := sort.Search(len(s.records), func(i int) bool { return s.records[i].seq > after })
+	if i == len(s.records) {
+		return Batch{}, false, nil
+	}
+	batch, err := s.readBatchLocked(s.records[i])
+	if err != nil {
+		return Batch{}, false, err
+	}
+	return batch, true, nil
+}
+
+func (s *Store) readBatchLocked(rec record) (Batch, error) {
+	var payload []byte
+	found := false
+	err := scanSegment(s.dir, rec.seg, func(seq uint64, _ int64, _ int, data []byte) error {
+		if seq != rec.seq {
+			return nil
+		}
+		payload = append([]byte(nil), data...)
+		found = true
+		return errFound
+	})
+	if err != nil && !errors.Is(err, errFound) {
+		return Batch{}, err
+	}
+	if !found {
+		return Batch{}, fmt.Errorf("wal: record %d missing from segment %d", rec.seq, rec.seg)
+	}
+	return Batch{Seq: rec.seq, At: time.Unix(0, rec.at), Samples: rec.samples, Payload: payload}, nil
 }
 
 func (s *Store) Ack(seq uint64) error {
@@ -140,20 +191,61 @@ func (s *Store) Ack(seq uint64) error {
 	if seq <= s.cursor {
 		return nil
 	}
-	s.cursor = seq
-	return writeCursor(s.dir, seq)
+	if err := writeCursor(s.dir, seq); err != nil {
+		return err
+	}
+	s.advanceCursorLocked(seq)
+	s.reclaim()
+	return nil
 }
 
 func (s *Store) Discard(seq uint64, samples int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.dropped += uint64(samples)
 	if seq <= s.cursor {
 		return nil
 	}
+	if err := writeCursor(s.dir, seq); err != nil {
+		return err
+	}
+	s.dropped += uint64(samples)
+	s.advanceCursorLocked(seq)
+	s.reclaim()
+	return nil
+}
+
+func (s *Store) advanceCursorLocked(seq uint64) {
 	s.cursor = seq
-	return writeCursor(s.dir, seq)
+	i := sort.Search(len(s.records), func(i int) bool { return s.records[i].seq > seq })
+	for _, rec := range s.records[:i] {
+		s.pendingSamples -= rec.samples
+	}
+	n := copy(s.records, s.records[i:])
+	s.records = s.records[:n]
+}
+
+func (s *Store) reclaim() {
+	for {
+		indexes, err := segmentIndexes(s.dir)
+		if err != nil || len(indexes) <= 1 {
+			return
+		}
+		oldest := indexes[0]
+		occupied := false
+		for _, rec := range s.records {
+			if rec.seg == oldest {
+				occupied = true
+				break
+			}
+		}
+		if occupied {
+			return
+		}
+		if err := s.wl.Truncate(oldest + 1); err != nil {
+			return
+		}
+	}
 }
 
 func (s *Store) Size() int64 {
@@ -169,12 +261,9 @@ func (s *Store) Dropped() uint64 {
 }
 
 func (s *Store) PendingSamples() int {
-	pending := s.Pending()
-	total := 0
-	for _, batch := range pending {
-		total += batch.Samples
-	}
-	return total
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pendingSamples
 }
 
 func (s *Store) Close() error {
@@ -193,15 +282,21 @@ func (s *Store) evict() {
 			return
 		}
 		oldest := indexes[0]
-		samples := 0
-		_ = scanSegment(s.dir, oldest, func(_ uint64, _ int64, count int, _ []byte) error {
-			samples += count
-			return nil
-		})
+		dropped := 0
+		kept := s.records[:0]
+		for _, rec := range s.records {
+			if rec.seg == oldest {
+				dropped += rec.samples
+				s.pendingSamples -= rec.samples
+				continue
+			}
+			kept = append(kept, rec)
+		}
+		s.records = kept
 		if err := s.wl.Truncate(oldest + 1); err != nil {
 			return
 		}
-		s.dropped += uint64(samples)
+		s.dropped += uint64(dropped)
 	}
 }
 

@@ -37,22 +37,31 @@ func (s *Sender) Run(ctx context.Context) {
 }
 
 func (s *Sender) round(ctx context.Context) bool {
-	for _, batch := range s.Store.Pending() {
+	for {
+		batch, ok, err := s.Store.Next()
+		if err != nil {
+			log.Printf("sender: next: %v", err)
+			return true
+		}
+		if !ok {
+			return true
+		}
 		if err := s.Client.Send(ctx, batch.Payload); err != nil {
+			age := time.Since(batch.At).Round(time.Second)
 			if errors.Is(err, otlp.ErrPermanent) {
-				log.Printf("sender: dropping batch %d: %v", batch.Seq, err)
-				if ackErr := s.Store.Discard(batch.Seq, batch.Samples); ackErr != nil {
-					log.Printf("sender: discard batch %d: %v", batch.Seq, ackErr)
+				log.Printf("sender: dropping batch %d after %s: %v", batch.Seq, age, err)
+				if discardErr := s.Store.Discard(batch.Seq, batch.Samples); discardErr != nil {
+					log.Printf("sender: discard batch %d: %v", batch.Seq, discardErr)
+					return true
 				}
 				continue
 			}
-			log.Printf("sender: batch %d: %v", batch.Seq, err)
+			log.Printf("sender: batch %d after %s: %v", batch.Seq, age, err)
 			return ctx.Err() == nil
 		}
 		if err := s.Store.Ack(batch.Seq); err != nil {
 			log.Printf("sender: ack batch %d: %v", batch.Seq, err)
-			return false
+			return true
 		}
 	}
-	return true
 }
