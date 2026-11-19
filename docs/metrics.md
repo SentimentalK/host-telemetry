@@ -92,7 +92,7 @@ process source on Linux.
 | `collector.wal.size` | Gauge | `By` | — | Bounded buffer proof |
 | `collector.wal.dropped` | Counter | `{sample}` | — | Silent loss must never be silent |
 | `collector.send.queue.length` | Gauge | `{sample}` | — | Backpressure visibility |
-| `collector.scrape.duration` | Gauge | `s` | — | Per-source cost; catches a source misbehaving |
+| `collector.scrape.duration` | Gauge | `s` | `collector.source` | Per-source cost; catches a source misbehaving |
 | `collector.source.error` | Counter | `{error}` | `collector.source` | Partial-failure isolation |
 
 ## Reading order (how an AI should use this)

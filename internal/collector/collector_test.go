@@ -72,6 +72,63 @@ func TestMetricsText(t *testing.T) {
 	}
 }
 
+func TestRunSchedulesSources(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	good := stubSource{name: "run-good", points: []schema.Point{schema.NewPoint(schema.SystemUptime, 42)}}
+	bad := stubSource{name: "run-bad", err: errors.New("boom")}
+	col := collector.New([]source.Source{good, bad})
+
+	type result struct {
+		name   string
+		points []schema.Point
+		err    error
+		d      time.Duration
+	}
+	results := make(chan result, 2)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		col.Run(ctx, func(name string, points []schema.Point, err error, d time.Duration) {
+			results <- result{name: name, points: points, err: err, d: d}
+		})
+	}()
+
+	got := map[string]result{}
+	for range 2 {
+		select {
+		case r := <-results:
+			got[r.name] = r
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for source collection")
+		}
+	}
+
+	if r, ok := got["run-good"]; !ok || r.err != nil {
+		t.Fatalf("good source result = %+v", r)
+	} else if _, ok := findPoint(r.points, schema.SystemUptime, "", ""); !ok {
+		t.Errorf("good source missing %s", schema.SystemUptime)
+	}
+	if r, ok := got["run-bad"]; !ok || r.err == nil {
+		t.Fatalf("bad source result = %+v", r)
+	} else if _, ok := findPoint(r.points, schema.CollectorSourceError, schema.AttrCollectorSource, "run-bad"); !ok {
+		t.Errorf("bad source missing %s", schema.CollectorSourceError)
+	}
+
+	durations := col.Stats.Durations()
+	if len(durations) != 2 {
+		t.Fatalf("durations = %v, want 2 sources", durations)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not stop after cancellation")
+	}
+}
+
 func findPoint(points []schema.Point, name, attrKey, attrValue string) (schema.Point, bool) {
 	for _, point := range points {
 		if point.Name != name {

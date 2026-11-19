@@ -57,6 +57,7 @@ metrics:
     source: readme-5.4
     instrument: gauge
     unit: "s"
+    attributes: [{ref: collector.source}]
   - name: collector.source.error
     source: readme-12
     instrument: counter

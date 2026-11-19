@@ -12,6 +12,7 @@ import (
 type Collector struct {
 	Sources []source.Source
 	Now     func() time.Time
+	Stats   *Stats
 }
 
 type Result struct {
@@ -25,7 +26,7 @@ type SourceError struct {
 }
 
 func New(sources []source.Source) *Collector {
-	return &Collector{Sources: sources, Now: time.Now}
+	return &Collector{Sources: sources, Now: time.Now, Stats: newStats()}
 }
 
 func (c *Collector) CollectOnce(ctx context.Context) Result {

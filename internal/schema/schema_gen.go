@@ -2,6 +2,8 @@
 
 package schema
 
+const Version = "v1.45.0"
+
 const (
 	CollectorScrapeDuration               = "collector.scrape.duration"
 	CollectorSelfCPUTime                  = "collector.self.cpu.time"
@@ -353,7 +355,7 @@ const (
 )
 
 var metrics = []MetricDef{
-	{Name: CollectorScrapeDuration, Unit: "s", Kind: KindGauge},
+	{Name: CollectorScrapeDuration, Unit: "s", Kind: KindGauge, Attrs: []AttrDef{{Name: AttrCollectorSource}}},
 	{Name: CollectorSelfCPUTime, Unit: "s", Kind: KindCounter},
 	{Name: CollectorSelfMemoryUsage, Unit: "By", Kind: KindUpDownCounter},
 	{Name: CollectorSendQueueLength, Unit: "{sample}", Kind: KindGauge},

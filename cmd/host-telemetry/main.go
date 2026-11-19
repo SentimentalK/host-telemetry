@@ -2,22 +2,32 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/SentimentalK/host-telemetry/internal/collector"
+	"github.com/SentimentalK/host-telemetry/internal/hostinfo"
+	"github.com/SentimentalK/host-telemetry/internal/otlp"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
+	"github.com/SentimentalK/host-telemetry/internal/sender"
 	"github.com/SentimentalK/host-telemetry/internal/source"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
+	"github.com/SentimentalK/host-telemetry/internal/wal"
 )
+
+const ServiceVersion = "dev"
 
 func main() {
 	if len(os.Args) < 2 {
@@ -48,47 +58,177 @@ func run(args []string) {
 	fixturesDir := flags.String("fixtures", "testdata", "fixture root")
 	platform := flags.String("platform", "linux", "fixture platform")
 	listen := flags.String("listen", "127.0.0.1:9101", "listen address")
+	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint; empty disables sending")
+	token := flags.String("token", "", "bearer token")
+	walDir := flags.String("wal-dir", defaultWALDir(), "write-ahead log directory")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	src, err := fixtures.LoadPlatform(*fixturesDir, *platform)
+
+	start := time.Now()
+	fixture, err := fixtures.LoadPlatform(*fixturesDir, *platform)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
 		os.Exit(1)
 	}
-	col := collector.New([]source.Source{src})
-	var mu sync.RWMutex
-	points := collect(col)
-	go func() {
-		ticker := time.NewTicker(15 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			next := collect(col)
-			mu.Lock()
-			points = next
-			mu.Unlock()
+
+	var store *wal.Store
+	var walStats collector.WALStats
+	if *endpoint != "" {
+		store, err = wal.Open(*walDir, 256<<20)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
+			os.Exit(1)
 		}
+		walStats = store
+	}
+
+	pool := collector.New([]source.Source{fixture})
+	pool.Sources = append(pool.Sources, collector.NewSelfSource(os.DirFS("/"), pool.Stats, walStats, start))
+	for _, src := range pool.Sources {
+		pool.Stats.Record(src.Name(), 0)
+	}
+
+	root := os.DirFS("/")
+	hostID, _ := hostinfo.ID(root)
+	hostName, _ := hostinfo.Name()
+	osType, osVersion, osDescription := hostinfo.OS(root)
+	resource := otlp.Resource{
+		HostID:         hostID,
+		HostName:       hostName,
+		HostArch:       hostinfo.Arch(),
+		OSType:         osType,
+		OSVersion:      osVersion,
+		OSDescription:  osDescription,
+		ServiceName:    "host-telemetry",
+		ServiceVersion: ServiceVersion,
+		SchemaVersion:  schema.Version,
+	}
+
+	snapshot := &snapshot{points: make(map[string]schema.Point)}
+	sink := func(source string, points []schema.Point, err error, d time.Duration) {
+		if err != nil {
+			log.Printf("source %s: %v", source, err)
+		}
+		snapshot.update(points)
+		if store == nil || len(points) == 0 {
+			return
+		}
+		now := time.Now()
+		payload, encodeErr := otlp.Encode(points, now, start, resource)
+		if encodeErr != nil {
+			log.Printf("encode %s: %v", source, encodeErr)
+			return
+		}
+		if _, appendErr := store.Append(now, len(points), payload); appendErr != nil {
+			log.Printf("wal %s: %v", source, appendErr)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var workers sync.WaitGroup
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		pool.Run(ctx, sink)
 	}()
+	if store != nil {
+		client := &otlp.Client{Config: otlp.Config{Endpoint: *endpoint, Token: *token}}
+		transport := &sender.Sender{Store: store, Client: client}
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			transport.Run(ctx)
+		}()
+	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/metrics", collector.MetricsHandler(func() []schema.Point {
-		mu.RLock()
-		defer mu.RUnlock()
-		return points
-	}))
+	mux.HandleFunc("/metrics", collector.MetricsHandler(snapshot.list))
+	server := &http.Server{Addr: *listen, Handler: mux}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
 	log.Printf("listening on %s", *listen)
-	if err := http.ListenAndServe(*listen, mux); err != nil {
-		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
+	serveErr := server.ListenAndServe()
+	stop()
+	workers.Wait()
+	if store != nil {
+		if err := store.Close(); err != nil {
+			log.Printf("wal close: %v", err)
+		}
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", serveErr)
 		os.Exit(1)
 	}
 }
 
-func collect(c *collector.Collector) []schema.Point {
-	result := c.CollectOnce(context.Background())
-	for _, sourceErr := range result.Errors {
-		log.Printf("source %s: %v", sourceErr.Source, sourceErr.Err)
+func defaultWALDir() string {
+	if state := os.Getenv("XDG_STATE_HOME"); state != "" {
+		return filepath.Join(state, "host-telemetry", "wal")
 	}
-	return result.Points
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".host-telemetry", "wal")
+	}
+	return filepath.Join(home, ".local", "state", "host-telemetry", "wal")
+}
+
+type snapshot struct {
+	mu     sync.Mutex
+	points map[string]schema.Point
+}
+
+func (s *snapshot) update(points []schema.Point) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, point := range points {
+		s.points[seriesKey(point)] = point
+	}
+}
+
+func (s *snapshot) list() []schema.Point {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]schema.Point, 0, len(s.points))
+	for _, point := range s.points {
+		out = append(out, point)
+	}
+	sort.Slice(out, func(i, j int) bool { return seriesLess(out[i], out[j]) })
+	return out
+}
+
+func seriesKey(point schema.Point) string {
+	var b strings.Builder
+	b.WriteString(point.Name)
+	for _, attr := range point.Attrs {
+		b.WriteByte(0)
+		b.WriteString(attr.Key)
+		b.WriteByte('=')
+		b.WriteString(attr.Value)
+	}
+	return b.String()
+}
+
+func seriesLess(a, b schema.Point) bool {
+	if a.Name != b.Name {
+		return a.Name < b.Name
+	}
+	for i := 0; i < len(a.Attrs) && i < len(b.Attrs); i++ {
+		if a.Attrs[i].Key != b.Attrs[i].Key {
+			return a.Attrs[i].Key < b.Attrs[i].Key
+		}
+		if a.Attrs[i].Value != b.Attrs[i].Value {
+			return a.Attrs[i].Value < b.Attrs[i].Value
+		}
+	}
+	return len(a.Attrs) < len(b.Attrs)
 }
 
 func printMetrics(w io.Writer) {
