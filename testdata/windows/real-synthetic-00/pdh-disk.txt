@@ -1,0 +1,9 @@
+\PhysicalDisk(0 C:)\Disk Read Bytes/sec	272696576	1048576	0
+\PhysicalDisk(0 C:)\Disk Write Bytes/sec	272696576	2097152	0
+\PhysicalDisk(0 C:)\Disk Reads/sec	272696320	5120	0
+\PhysicalDisk(0 C:)\Disk Writes/sec	272696320	10240	0
+\PhysicalDisk(1 D:)\Disk Read Bytes/sec	272696576	3145728	0
+\PhysicalDisk(1 D:)\Disk Write Bytes/sec	272696576	4194304	0
+\PhysicalDisk(1 D:)\Disk Reads/sec	272696320	15360	0
+\PhysicalDisk(1 D:)\Disk Writes/sec	272696320	20480	0
+\PhysicalDisk(_Total)\Disk Read Bytes/sec	272696576	4194304	0

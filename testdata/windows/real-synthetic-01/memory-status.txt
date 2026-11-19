@@ -1,0 +1,4 @@
+total_phys=17179869184
+avail_phys=6442450944
+total_pagefile=25769803776
+avail_pagefile=10737418240

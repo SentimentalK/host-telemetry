@@ -11,7 +11,7 @@ import (
 )
 
 func TestSinglePlatformHasNoDuplicateSeries(t *testing.T) {
-	for _, platform := range []string{"linux", "darwin"} {
+	for _, platform := range []string{"linux", "darwin", "windows"} {
 		t.Run(platform, func(t *testing.T) {
 			sources, err := fixtures.LoadPlatform(testdataRoot, platform)
 			if err != nil {

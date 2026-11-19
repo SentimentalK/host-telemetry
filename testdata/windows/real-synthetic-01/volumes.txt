@@ -1,0 +1,3 @@
+drive=C:	type=NTFS	readonly=false	total=511101108224	free=255550500000
+drive=D:	type=exFAT	readonly=false	total=1000204886016	free=250000000000
+drive=E:	type=UDF	readonly=true	total=1000000000	free=90000000

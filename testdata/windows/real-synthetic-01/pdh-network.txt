@@ -1,0 +1,16 @@
+\Network Interface(Ethernet)\Bytes Received/sec	272696576	2097152	0
+\Network Interface(Ethernet)\Bytes Sent/sec	272696576	1048576	0
+\Network Interface(Ethernet)\Packets Received Errors	272696320	1	0
+\Network Interface(Ethernet)\Packets Outbound Errors	272696320	2	0
+\Network Interface(Ethernet)\Packets Received/sec	272696320	2048	0
+\Network Interface(Ethernet)\Packets Sent/sec	272696320	1024	0
+\Network Interface(Ethernet)\Packets Received Discarded	272696320	3	0
+\Network Interface(Ethernet)\Packets Outbound Discarded	272696320	4	0
+\Network Interface(Wi-Fi)\Bytes Received/sec	272696576	3145728	0
+\Network Interface(Wi-Fi)\Bytes Sent/sec	272696576	2097152	0
+\Network Interface(Wi-Fi)\Packets Received Errors	272696320	5	0
+\Network Interface(Wi-Fi)\Packets Outbound Errors	272696320	6	0
+\Network Interface(Wi-Fi)\Packets Received/sec	272696320	4096	0
+\Network Interface(Wi-Fi)\Packets Sent/sec	272696320	2048	0
+\Network Interface(Wi-Fi)\Packets Received Discarded	272696320	7	0
+\Network Interface(Wi-Fi)\Packets Outbound Discarded	272696320	8	0

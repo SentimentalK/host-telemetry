@@ -46,7 +46,12 @@ func TestRenderedMetricsHaveRequiredNames(t *testing.T) {
 	}{
 		{"linux", []string{uptimeHelp, cpuHelp}},
 		{"darwin", []string{uptimeHelp}},
-		{"windows", []string{cpuHelp}},
+		{"windows", []string{
+			cpuHelp,
+			uptimeHelp,
+			"# HELP system_disk_io_total OTel metric system.disk.io; unit By",
+			"# HELP system_network_io_total OTel metric system.network.io; unit By",
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.platform, func(t *testing.T) {
