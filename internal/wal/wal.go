@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	recordMagic        = "HTW1"
-	recordHeaderSize   = 28
-	defaultSegmentSize = 4 << 20
-	cursorName         = "cursor"
+	recordMagic          = "HTW1"
+	recordHeaderSize     = 28
+	defaultSegmentSize   = 4 << 20
+	defaultRollThreshold = 64 << 10
+	cursorName           = "cursor"
 )
 
 var errFound = errors.New("wal: record found")
@@ -44,6 +45,7 @@ type Store struct {
 	mu             sync.Mutex
 	dir            string
 	maxBytes       int64
+	rollThreshold  int64
 	wl             *wlog.WL
 	cursor         uint64
 	next           uint64
@@ -53,10 +55,10 @@ type Store struct {
 }
 
 func Open(dir string, maxBytes int64) (*Store, error) {
-	return open(dir, maxBytes, defaultSegmentSize)
+	return open(dir, maxBytes, defaultSegmentSize, defaultRollThreshold)
 }
 
-func open(dir string, maxBytes int64, segmentSize int) (*Store, error) {
+func open(dir string, maxBytes int64, segmentSize int, rollThreshold int64) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("wal: create dir: %w", err)
 	}
@@ -77,7 +79,7 @@ func open(dir string, maxBytes int64, segmentSize int) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("wal: open: %w", err)
 	}
-	store := &Store{dir: dir, maxBytes: maxBytes, wl: writer, cursor: cursor, next: cursor + 1}
+	store := &Store{dir: dir, maxBytes: maxBytes, rollThreshold: rollThreshold, wl: writer, cursor: cursor, next: cursor + 1}
 	for _, index := range existing {
 		err := scanSegment(dir, index, func(seq uint64, at int64, samples int, _ []byte) error {
 			if seq >= store.next {
@@ -137,19 +139,29 @@ func (s *Store) Pending() ([]Batch, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	indexes, err := segmentIndexes(s.dir)
+	if err != nil {
+		return nil, err
+	}
 	var batches []Batch
-	after := s.cursor
-	for {
-		batch, ok, err := s.nextLocked(after)
+	for _, index := range indexes {
+		err := scanSegment(s.dir, index, func(seq uint64, at int64, samples int, payload []byte) error {
+			if seq <= s.cursor {
+				return nil
+			}
+			batches = append(batches, Batch{
+				Seq:     seq,
+				At:      time.Unix(0, at),
+				Samples: samples,
+				Payload: append([]byte(nil), payload...),
+			})
+			return nil
+		})
 		if err != nil {
-			return nil, err
-		}
-		if !ok {
 			return batches, nil
 		}
-		batches = append(batches, batch)
-		after = batch.Seq
 	}
+	return batches, nil
 }
 
 func (s *Store) nextLocked(after uint64) (Batch, bool, error) {
@@ -226,6 +238,15 @@ func (s *Store) advanceCursorLocked(seq uint64) {
 }
 
 func (s *Store) reclaim() {
+	if len(s.records) == 0 && s.sizeLocked() > s.rollThreshold {
+		next, err := s.wl.NextSegment()
+		if err != nil {
+			return
+		}
+		if err := s.wl.Truncate(next); err != nil {
+			return
+		}
+	}
 	for {
 		indexes, err := segmentIndexes(s.dir)
 		if err != nil || len(indexes) <= 1 {
