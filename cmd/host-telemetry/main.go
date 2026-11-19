@@ -27,6 +27,7 @@ import (
 	"github.com/SentimentalK/host-telemetry/internal/schema"
 	"github.com/SentimentalK/host-telemetry/internal/sender"
 	"github.com/SentimentalK/host-telemetry/internal/source"
+	"github.com/SentimentalK/host-telemetry/internal/source/darwin"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 	"github.com/SentimentalK/host-telemetry/internal/source/linux"
 	"github.com/SentimentalK/host-telemetry/internal/wal"
@@ -65,10 +66,11 @@ func usage() {
 func run(args []string) {
 	flags := flag.NewFlagSet("run", flag.ExitOnError)
 	fixturesDir := flags.String("fixtures", "", "fixture root; empty collects the live host")
-	platform := flags.String("platform", "linux", "fixture platform")
+	platform := flags.String("platform", runtime.GOOS, "fixture platform")
 	listen := flags.String("listen", "127.0.0.1:9101", "listen address")
 	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint; empty disables sending")
 	token := flags.String("token", "", "bearer token")
+	sensors := flags.String("sensors", "", "sensor backend; macmon enables darwin sensors")
 	walDir := flags.String("wal-dir", defaultWALDir(), "write-ahead log directory")
 	configPath := flags.String("config", defaultConfigPath(), "config file path")
 	if err := flags.Parse(args); err != nil {
@@ -95,9 +97,12 @@ func run(args []string) {
 	if !set["wal-dir"] && cfg.WALDir != "" {
 		*walDir = cfg.WALDir
 	}
+	if !set["sensors"] && cfg.Sensors != "" {
+		*sensors = cfg.Sensors
+	}
 
 	start := time.Now()
-	sources, err := loadSources(*fixturesDir, *platform)
+	sources, err := loadSources(*fixturesDir, *platform, *sensors)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "host-telemetry: %v\n", err)
 		os.Exit(1)
@@ -218,14 +223,31 @@ func run(args []string) {
 	}
 }
 
-func loadSources(fixtureRoot, platform string) ([]source.Source, error) {
+func loadSources(fixtureRoot, platform, sensors string) ([]source.Source, error) {
 	if fixtureRoot != "" {
-		return fixtures.LoadPlatform(fixtureRoot, platform)
+		sources, err := fixtures.LoadPlatform(fixtureRoot, platform)
+		if err != nil {
+			return nil, err
+		}
+		if platform == "darwin" && sensors != "macmon" {
+			filtered := make([]source.Source, 0, len(sources))
+			for _, src := range sources {
+				if src.Name() != "darwin-sensors" {
+					filtered = append(filtered, src)
+				}
+			}
+			sources = filtered
+		}
+		return sources, nil
 	}
-	if runtime.GOOS != "linux" {
-		return nil, fmt.Errorf("live collection supports linux only, running on %s", runtime.GOOS)
+	switch platform {
+	case "linux":
+		return linux.NewLive(os.DirFS("/"), linux.Options{}), nil
+	case "darwin":
+		return darwin.NewLive(darwin.Options{Sensors: sensors == "macmon"}), nil
+	default:
+		return nil, fmt.Errorf("live collection supports linux and darwin only, running on %s", platform)
 	}
-	return linux.NewLive(os.DirFS("/"), linux.Options{}), nil
 }
 
 func defaultWALDir() string {

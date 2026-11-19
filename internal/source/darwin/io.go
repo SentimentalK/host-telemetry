@@ -266,11 +266,15 @@ type dfEntry struct {
 }
 
 func parseFilesystems(mountData, dfData []byte, dir string) ([]filesystemStat, error) {
-	mounts, err := parseMount(mountData, dir+"/mount.txt")
+	return parseFilesystemsFrom(mountData, dfData, dir+"/mount.txt", dir+"/df.txt")
+}
+
+func parseFilesystemsFrom(mountData, dfData []byte, mountFile, dfFile string) ([]filesystemStat, error) {
+	mounts, err := parseMount(mountData, mountFile)
 	if err != nil {
 		return nil, err
 	}
-	usage, err := parseDF(dfData, dir+"/df.txt")
+	usage, err := parseDF(dfData, dfFile)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +285,7 @@ func parseFilesystems(mountData, dfData []byte, dir string) ([]filesystemStat, e
 			continue
 		}
 		if row.blocks <= 0 {
-			return nil, fmt.Errorf("%s/df.txt: %s: 1024-blocks must be positive", dir, mount.mountpoint)
+			return nil, fmt.Errorf("%s: %s: 1024-blocks must be positive", dfFile, mount.mountpoint)
 		}
 		total := row.blocks * 1024
 		used := row.used * 1024
@@ -458,8 +462,12 @@ func (s *diskSource) Collect(ctx context.Context) ([]schema.Point, error) {
 		}
 		return nil, errs.disk
 	}
+	return diskPoints(snaps[len(snaps)-1].disk), nil
+}
+
+func diskPoints(disks []diskStat) []schema.Point {
 	var points []schema.Point
-	for _, disk := range snaps[len(snaps)-1].disk {
+	for _, disk := range disks {
 		device := schema.Attr{Key: schema.AttrSystemDeviceName, Value: disk.name}
 		points = append(points,
 			schema.NewPoint(schema.SystemDiskIO, disk.readBytes, device, directionAttr(schema.DiskIODirectionRead)),
@@ -470,7 +478,7 @@ func (s *diskSource) Collect(ctx context.Context) ([]schema.Point, error) {
 			schema.NewPoint(schema.SystemDiskOperationTime, disk.writeTime/1e9, device, directionAttr(schema.DiskIODirectionWrite)),
 		)
 	}
-	return points, nil
+	return points
 }
 
 type networkSource struct{ set *snapshotSet }
@@ -490,8 +498,12 @@ func (s *networkSource) Collect(ctx context.Context) ([]schema.Point, error) {
 		}
 		return nil, errs.network
 	}
+	return networkPoints(snaps[len(snaps)-1].network), nil
+}
+
+func networkPoints(stats []networkStat) []schema.Point {
 	var points []schema.Point
-	for _, net := range snaps[len(snaps)-1].network {
+	for _, net := range stats {
 		iface := schema.Attr{Key: schema.AttrNetworkInterfaceName, Value: net.name}
 		device := schema.Attr{Key: schema.AttrSystemDeviceName, Value: net.name}
 		receive := schema.Attr{Key: schema.AttrNetworkIODirection, Value: schema.NetworkIODirectionReceive}
@@ -506,7 +518,7 @@ func (s *networkSource) Collect(ctx context.Context) ([]schema.Point, error) {
 			schema.NewPoint(schema.SystemNetworkPacketDropped, net.txDropped, iface, transmit),
 		)
 	}
-	return points, nil
+	return points
 }
 
 type filesystemSource struct{ set *snapshotSet }
@@ -526,8 +538,12 @@ func (s *filesystemSource) Collect(ctx context.Context) ([]schema.Point, error) 
 		}
 		return nil, errs.filesystem
 	}
+	return filesystemPoints(snaps[len(snaps)-1].filesystems), nil
+}
+
+func filesystemPoints(stats []filesystemStat) []schema.Point {
 	var points []schema.Point
-	for _, fsStat := range snaps[len(snaps)-1].filesystems {
+	for _, fsStat := range stats {
 		base := []schema.Attr{
 			{Key: schema.AttrSystemDeviceName, Value: fsStat.device},
 			{Key: schema.AttrSystemFilesystemMode, Value: fsStat.mode},
@@ -551,7 +567,7 @@ func (s *filesystemSource) Collect(ctx context.Context) ([]schema.Point, error) 
 			)
 		}
 	}
-	return points, nil
+	return points
 }
 
 type processSource struct{ set *snapshotSet }
@@ -571,7 +587,10 @@ func (s *processSource) Collect(ctx context.Context) ([]schema.Point, error) {
 		}
 		return nil, errs.process
 	}
-	last := snaps[len(snaps)-1].process
+	return processPoints(snaps[len(snaps)-1].process), nil
+}
+
+func processPoints(last processStat) []schema.Point {
 	points := []schema.Point{
 		schema.NewPoint(schema.SystemProcessCount, float64(last.running), stateAttr(schema.ProcessStateRunning)),
 		schema.NewPoint(schema.SystemProcessCount, float64(last.sleeping), stateAttr(schema.ProcessStateSleeping)),
@@ -581,7 +600,7 @@ func (s *processSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if last.hasLimit {
 		points = append(points, schema.NewPoint(schema.SystemProcessLimit, last.limit))
 	}
-	return points, nil
+	return points
 }
 
 type sensorsSource struct{ set *snapshotSet }
@@ -598,7 +617,10 @@ func (s *sensorsSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if errs.sensors != nil {
 		return nil, errs.sensors
 	}
-	sensors := snaps[len(snaps)-1].sensors
+	return sensorsPoints(snaps[len(snaps)-1].sensors), nil
+}
+
+func sensorsPoints(sensors sensorsStat) []schema.Point {
 	var points []schema.Point
 	if sensors.cpuTemp != nil {
 		points = append(points, schema.NewPoint(schema.HWTemperature, *sensors.cpuTemp, hwAttrs("cpu", "cpu", "cpu")...))
@@ -628,7 +650,7 @@ func (s *sensorsSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if sensors.sysPower != nil {
 		points = append(points, schema.NewPoint(schema.HWPower, *sensors.sysPower, powerAttrs("system", schema.HWTypePowerSupply)...))
 	}
-	return points, nil
+	return points
 }
 
 func directionAttr(value string) schema.Attr {

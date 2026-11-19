@@ -18,6 +18,7 @@ type Config struct {
 	HostName string `yaml:"host_name"`
 	Listen   string `yaml:"listen"`
 	WALDir   string `yaml:"wal_dir"`
+	Sensors  string `yaml:"sensors"`
 }
 
 func Load(path string) (Config, error) {
@@ -84,6 +85,9 @@ func (c Config) WithEnv(getenv func(string) string) Config {
 	}
 	if v := getenv("HT_WAL_DIR"); v != "" {
 		c.WALDir = v
+	}
+	if v := getenv("HT_SENSORS"); v != "" {
+		c.Sensors = v
 	}
 	return c
 }

@@ -3,6 +3,7 @@ module github.com/SentimentalK/host-telemetry
 go 1.26.7
 
 require (
+	github.com/ebitengine/purego v0.11.3
 	github.com/prometheus/prometheus v0.316.0
 	go.opentelemetry.io/proto/otlp v1.11.1
 	google.golang.org/protobuf v1.36.12

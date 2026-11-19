@@ -540,7 +540,10 @@ func (s *memorySource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if errs.vmstat != nil {
 		return nil, errs.vmstat
 	}
-	last := snaps[len(snaps)-1]
+	return memoryPoints(snaps[len(snaps)-1]), nil
+}
+
+func memoryPoints(last snapshot) []schema.Point {
 	used := (last.active + last.wired + last.compressor) * last.pageSize
 	available := (last.free + last.inactive + last.speculative) * last.pageSize
 	points := []schema.Point{
@@ -557,7 +560,7 @@ func (s *memorySource) Collect(ctx context.Context) ([]schema.Point, error) {
 			schema.NewPoint(schema.SystemPagingUtilization, last.swapFree/total, pagingState(schema.SystemPagingStateFree)),
 		)
 	}
-	return points, nil
+	return points
 }
 
 func memoryState(value string) schema.Attr {
@@ -600,12 +603,15 @@ func (s *inventorySource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if errs.sysctl != nil {
 		return nil, errs.sysctl
 	}
-	last := snaps[len(snaps)-1]
+	return inventoryPoints(snaps[len(snaps)-1]), nil
+}
+
+func inventoryPoints(last snapshot) []schema.Point {
 	return []schema.Point{
 		schema.NewPoint(schema.SystemCPULogicalCount, last.logicalCPU),
 		schema.NewPoint(schema.SystemCPUPhysicalCount, last.physicalCPU),
 		schema.NewPoint(schema.SystemMemoryLimit, last.memoryLimit),
-	}, nil
+	}
 }
 
 func New(samples fs.FS) []source.Source {
