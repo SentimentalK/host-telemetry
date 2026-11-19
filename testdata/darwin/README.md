@@ -1,34 +1,42 @@
-synthetic, normalised to darwin sysctl + vm_stat + ioreg + netstat + mount + df + ps + macmon
+# darwin fixture (`synthetic`)
 
-# darwin fixture
+**synthetic**。本目录的文本 fixture 按真实 macOS 命令的输出形态人工合成，不是真机采集；它们只证明
+解析器行为与 golden 序列稳定，不代表真机上的字段完整性。
 
-`synthetic`。文件内容按真实 macOS 命令的文本形态合成，非真实机器采集。
+## 文件与来源
 
-`real-synthetic-*` 为多快照 fixture，`darwin.New` 按目录名排序；CPU/内存/uptime 取首末快照做差分，其余源取末个快照（`real-synthetic-01`）。`golden.txt` 由它们生成。
-`sample-00` 为 M0 兼容快照（`legacy` 模式），只有 sysctl / vm_stat / boottime / now；缺文件的源整源跳过，`golden-sample.txt` 由它生成。
+| 文件 | 对应真实命令 | 覆盖字段 | 备注 |
+|---|---|---|---|
+| `sysctl.txt` | `sysctl -a`（子集） | `hw.logicalcpu`、`hw.physicalcpu`、`hw.ncpu`、`hw.memsize`、`kern.clockrate`（`hz`）、`vm.swapusage`（used/free）、`kern.maxproc` | `kern.maxproc` → `system.process.limit`；缺失则不发点 |
+| `host_statistics.txt` | 无对应文本命令；`host_statistics(HOST_CPU_LOAD_INFO)` 结构 | `user_ticks`、`system_ticks`、`idle_ticks`（单位 hz） | 首行为 `# synthetic host_statistics(HOST_CPU_LOAD_INFO)`，解析器按 `key: value` 行读取 |
+| `vm_stat.txt` | `vm_stat` | page size、`Pages free`、`Pages active`、`Pages inactive`、`Pages speculative`、`Pages wired down`、`Pages occupied by compressor` | `Pages free` 只参与 available 计算，不单独发 `state=free`（semconv v1.45.0 的 `system.memory.state` 已无 `free`） |
+| `boottime.txt` / `now.txt` | `sysctl -n kern.boottime` / `date +%s` | epoch 秒 | 差值即 `system.uptime`；`now < boot` 时报错 |
+| `ioreg.txt` | `ioreg -c IOBlockStorageDriver -r -l -w 0` | `Statistics` 的 `Bytes (Read/Write)`、`Operations (Read/Write)`、`Total Time (Read/Write)`（ns）；`IOMedia` 的 `BSD Name` | `system.device.name` 取 `Whole = Yes` 的 `IOMedia`；不发 `system.disk.io_time` |
+| `netstat.txt` | `netstat -ib` | `Ibytes/Obytes`、`Ipkts/Opkts`、`Ierrs/Oerrs`、`Drop` | 只消费含 `<Link#N>` 的接口行；`Drop` 只发 transmit 方向 |
+| `mount.txt` / `df.txt` | `mount` + `df -kP` | 设备、mountpoint、fstype、`read-only` 选项；1024-blocks / Used / Available | 按 mountpoint 关联；`reserved = total - used - free`；解析器接受 5 列起的 POSIX 形态，fixture 额外保留 macOS `df -k` 的 `iused/ifree/%iused` 列 |
+| `ps.txt` | `ps -axo stat=` | 状态串首字符 `R`、`S/D/I`、`T`、`Z` | 四种 state（running/sleeping/stopped/defunct）都发，0 也发；未知状态跳过 |
+| `macmon.json` | `macmon pipe -s 1 -i 1000` | `temp.cpu_temp_avg`/`gpu_temp_avg`、`fans[].name/rpm/max_rpm`、`cpu_power`/`gpu_power`/`sys_power` | 可选子 source；字段名归一到 `hw.*`；JSON null 跳过；文件不存在时整源不发点、不报错 |
 
-## 覆盖字段
+`ioreg-platform.txt`（`hostinfo` 测试用）与 `install-dry-run.golden`（launchd 安装计划测试用）是测试
+harness fixture，不参与遥测采集。
 
-- `sysctl.txt`：`sysctl -a` 形态。`hw.logicalcpu`、`hw.physicalcpu`、`hw.memsize`、`kern.clockrate`（`hz = N`）、`vm.swapusage`（used/free）、`kern.maxproc`（`system.process.limit`，缺失则不发点）。
-- `vm_stat.txt`：页大小、`Pages free`、`Pages active`、`Pages inactive`、`Pages speculative`、`Pages wired down`、`Pages occupied by compressor`。
-  `Pages free` 参与 available 计算，但不单独发 `state=free`：semconv v1.45.0 的 `system.memory.state` 只有 `used|available`，`free` 已 obsolete。
-- `host_statistics.txt`：合成格式，首行 `# synthetic host_statistics(HOST_CPU_LOAD_INFO)`，随后 `user_ticks` / `system_ticks` / `idle_ticks`（单位 hz）。
-- `boottime.txt` 与 `now.txt`：epoch 秒，差值即 `system.uptime`。
-- `ioreg.txt`：`ioreg -r -c IOBlockStorageDriver -l` 形态。每个 `+-o IOBlockStorageDriver` 节点的 `"Statistics"` 字典提供 `Bytes (Read/Write)` → `system.disk.io`、`Operations (Read/Write)` → `system.disk.operations`、`Total Time (Read/Write)`（ns）→ `system.disk.operation_time`（s）。属性 `system.device.name` 取同一子树下 `Whole = Yes` 的 `IOMedia` 的 `"BSD Name"`。不发 `system.disk.io_time`。
-- `netstat.txt`：`netstat -ib` 形态，只消费含 `<Link#N>` 的接口行。`Ibytes/Obytes` → `system.network.io`，`Ipkts/Opkts` → `system.network.packet.count`（属性用 `system.device.name`，与 semconv 一致），`Ierrs/Oerrs` → `system.network.errors`，`Drop` → 仅 transmit 的 `system.network.packet.dropped`。`system.network.io` 带 `network.interface.name`（`docs/metrics.md` 契约要求；否则多网卡会产生重复序列）。
-- `mount.txt`：`mount` 形态，`device on mountpoint (fstype, option, ...)`；选项含 `read-only` → `system.filesystem.mode=ro`，否则 `rw`。
-- `df.txt`：`df -k` 形态（9 列：Filesystem / 1024-blocks / Used / Available / Capacity / iused / ifree / %iused / Mounted on），按 mountpoint 与 `mount.txt` 关联。`system.filesystem.usage` / `utilization` 的 state 为 `used`（Used×1024）、`free`（Available×1024）、`reserved`（total−used−free，0 也发）。属性：`system.device.name`、`system.filesystem.mode`、`system.filesystem.mountpoint`、`system.filesystem.state`。
-- `system.filesystem.type` 只在映射命中时写入：`hfs`→`hfsplus`、`exfat`→`exfat`、`msdos`→`fat32`、`ntfs`→`ntfs`；`apfs` 等未知类型照常发点但省略该属性。
-- `ps.txt`：每行一条 `ps -axo stat=` 的状态串。首字符 `R`→running、`S/D/I`→sleeping、`T`→stopped、`Z`→defunct；四个 state 都发（0 也发），未知状态跳过。
-- `macmon.json`：`macmon pipe` 的单条 JSON。`temp.cpu_temp_avg` / `temp.gpu_temp_avg` → `hw.temperature`（`hw.id`/`hw.name`/`hw.sensor_location` 均为 cpu 或 gpu）；`fans[].name` / `rpm` / `max_rpm` → `hw.fan.speed`、`hw.fan.speed.limit`（`hw.limit_type=max`）、`hw.fan.speed_ratio`（rpm/max_rpm），`hw.sensor_location=chassis`；`cpu_power` / `gpu_power` / `sys_power` → `hw.power`（`hw.type` 分别为 cpu / gpu / power_supply，system 的 `hw.id`/`hw.name` 为 system）。JSON null 字段跳过；文件不存在时整源不发点、不报错。
+## 快照与 golden
 
-`real-synthetic-00` 与 `real-synthetic-01` 的数值相互独立；golden 取 `-01`。`-00` 的 `gpu_power` 为 null，用于覆盖 null 跳过路径。
+- `real-synthetic-00`、`real-synthetic-01`：两快照 fixture，目录名排序后取首末快照。`system.cpu.time`
+  取末快照计数，`system.cpu.utilization` 用首末 tick 差分；内存、uptime 与其余源取末快照（`-01`）。
+  `golden.txt` 由这两个目录经真实解析路径生成；`-00` 的 `gpu_power` 为 null，用来覆盖 null 跳过路径。
+- `sample-00`：M0 兼容快照（`legacy` 模式），只有 `sysctl.txt` / `vm_stat.txt` / `boottime.txt` / `now.txt`；
+  缺失文件的源整源跳过。`golden-sample.txt` 由它生成，覆盖 inventory / memory / paging / uptime 子集。
+- 区别：`golden.txt` 是 real-synthetic 全源 golden；`golden-sample.txt` 是 sample-00 的 M0 回退 golden，
+  两者都不能单独证明真机行为。
 
-## 未覆盖字段
+## 未覆盖
 
+- APFS 等 pinned enum 外的文件系统不带 `system.filesystem.type` 属性（fixture 的 `/` 即 APFS）。
 - 每 CPU（`cpu.logical_number`）的 CPU 时间与利用率。
 - `system.network.connection.count`。
 - `system.process.created`。
 - `system.pressure.*`（PSI，darwin 不在本契约范围）。
-- 真机 live 采集（本 fixture 只做解析与 golden；live 接线由后续任务完成）。
-- APFS 等未知文件系统不带 `system.filesystem.type` 属性。
+- 真机 live 采集（本目录只覆盖解析与 golden；live 接线未经真机验证）。
+- `macmon` 默认关闭：`--sensors macmon` 才注册 `hw.*` 子 source。
+- 真机 CPU/RSS 采集预算：`make budget` 只跑 linux fixture。
