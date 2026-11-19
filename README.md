@@ -246,7 +246,7 @@ testdata/{linux,darwin,windows}/   real raw samples for golden tests
 | **M2** | macOS (SMC via sysctl/IOKit; may temporarily wrap `macmon` as a sub-source) + LaunchDaemon | reboot → first sample within 30s |
 | **M3** | Windows (PDH counters + process table; optional LHM bridge for fans) + Service | service restart and power loss both lose no samples |
 | **M4** | workload layer (cgroup + one host-tool adapter) + event stream | 15 concurrent agents: per-workload ranking matches the host tool's own report |
-| **M5** | reference stack (compose: VictoriaMetrics + optional Grafana) + AI query recipes | one natural-language question → one PromQL query → narrow table |
+| **M5** ✅ | reference stack (compose: VictoriaMetrics + optional Grafana) + AI query recipes | one natural-language question → one PromQL query → narrow table |
 
 ## 12. Budgets and failure semantics
 
