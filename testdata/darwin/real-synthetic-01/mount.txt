@@ -1,0 +1,3 @@
+/dev/disk3s1s1 on / (apfs, local, read-only, journaled)
+/dev/disk3s5 on /Volumes/Backup (hfs, local, nodev, nosuid, journaled)
+/dev/disk4s1 on /Volumes/USB (exfat, local, noowners)

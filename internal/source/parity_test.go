@@ -23,7 +23,7 @@ func TestCrossPlatformParity(t *testing.T) {
 		}
 	}
 
-	for _, platform := range []string{"linux", "windows"} {
+	for _, platform := range platforms {
 		utilizations := findAll(points[platform], schema.SystemCPUUtilization)
 		if len(utilizations) == 0 {
 			t.Errorf("%s: missing %s", platform, schema.SystemCPUUtilization)
@@ -44,6 +44,20 @@ func TestCrossPlatformParity(t *testing.T) {
 		if sum > 1.0+1e-9 {
 			t.Errorf("%s: sum of %s modes = %v, want <= 1", platform, schema.SystemCPUUtilization, sum)
 		}
+	}
+
+	darwinModes := make(map[string]int)
+	for _, point := range findAll(points["darwin"], schema.SystemCPUUtilization) {
+		mode, _ := attr(point, schema.AttrCPUMode)
+		darwinModes[mode]++
+	}
+	for _, mode := range []string{"user", "system", "idle"} {
+		if darwinModes[mode] != 1 {
+			t.Errorf("darwin: %s mode %q rows = %d, want 1", schema.SystemCPUUtilization, mode, darwinModes[mode])
+		}
+	}
+	if len(darwinModes) != 3 {
+		t.Errorf("darwin: %s modes = %v, want user, system, idle", schema.SystemCPUUtilization, darwinModes)
 	}
 
 	for _, platform := range []string{"linux", "darwin"} {

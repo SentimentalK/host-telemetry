@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -74,10 +75,15 @@ func pointWithAttr(points []schema.Point, name, key, value string) (schema.Point
 func TestSourceNamesAndIntervals(t *testing.T) {
 	sources := darwin.New(realSynthetic(t))
 	want := map[string]time.Duration{
-		"darwin-cpu":       15 * time.Second,
-		"darwin-memory":    15 * time.Second,
-		"darwin-uptime":    4 * time.Second,
-		"darwin-inventory": 300 * time.Second,
+		"darwin-cpu":        15 * time.Second,
+		"darwin-memory":     15 * time.Second,
+		"darwin-uptime":     4 * time.Second,
+		"darwin-inventory":  300 * time.Second,
+		"darwin-disk":       15 * time.Second,
+		"darwin-network":    15 * time.Second,
+		"darwin-filesystem": 15 * time.Second,
+		"darwin-process":    15 * time.Second,
+		"darwin-sensors":    30 * time.Second,
 	}
 	if len(sources) != len(want) {
 		t.Fatalf("got %d sources, want %d", len(sources), len(want))
@@ -228,6 +234,17 @@ func TestLegacyMissingHostStatisticsIsSilent(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
+
+	for _, name := range []string{"darwin-disk", "darwin-network", "darwin-filesystem", "darwin-process", "darwin-sensors"} {
+		points, err := collect(t, sources, name)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(points) != 0 {
+			t.Errorf("%s: got %d points without its fixture, want 0", name, len(points))
+		}
+	}
 }
 
 func TestDarwinMemoryUtilizationWithinLimit(t *testing.T) {
@@ -287,4 +304,192 @@ func countPoints(points []schema.Point, name string) int {
 		}
 	}
 	return count
+}
+
+func TestDarwinGoldenCoversMetrics(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(fixtureRoot, "golden.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := make(map[string]int)
+	for _, line := range strings.Split(string(data), "\n") {
+		if line == "" {
+			continue
+		}
+		name := line
+		if index := strings.IndexAny(name, "{ "); index >= 0 {
+			name = name[:index]
+		}
+		counts[name]++
+	}
+	want := []string{
+		schema.SystemCPUTime,
+		schema.SystemCPUUtilization,
+		schema.SystemMemoryUsage,
+		schema.SystemMemoryUtilization,
+		schema.SystemPagingUsage,
+		schema.SystemPagingUtilization,
+		schema.SystemUptime,
+		schema.SystemDiskIO,
+		schema.SystemDiskOperations,
+		schema.SystemDiskOperationTime,
+		schema.SystemNetworkIO,
+		schema.SystemNetworkErrors,
+		schema.SystemNetworkPacketCount,
+		schema.SystemNetworkPacketDropped,
+		schema.SystemFilesystemUsage,
+		schema.SystemFilesystemUtilization,
+		schema.SystemProcessCount,
+		schema.SystemProcessLimit,
+		schema.SystemCPULogicalCount,
+		schema.SystemCPUPhysicalCount,
+		schema.SystemMemoryLimit,
+		schema.HWTemperature,
+		schema.HWFanSpeed,
+		schema.HWFanSpeedLimit,
+		schema.HWFanSpeedRatio,
+		schema.HWPower,
+	}
+	for _, name := range want {
+		if counts[name] == 0 {
+			t.Errorf("golden has no %s row", name)
+		}
+	}
+}
+
+func TestDarwinCPUModes(t *testing.T) {
+	points, err := collect(t, darwin.New(realSynthetic(t)), "darwin-cpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := make(map[string]int)
+	var sum float64
+	for _, point := range points {
+		if point.Name != schema.SystemCPUUtilization {
+			continue
+		}
+		mode, ok := attrValue(point, schema.AttrCPUMode)
+		if !ok {
+			t.Fatalf("%s point without %s: %v", schema.SystemCPUUtilization, schema.AttrCPUMode, point.Attrs)
+		}
+		counts[mode]++
+		sum += point.Value
+	}
+	if len(counts) != 3 || counts["user"] != 1 || counts["system"] != 1 || counts["idle"] != 1 {
+		t.Errorf("cpu modes = %v, want one each of user, system, idle", counts)
+	}
+	if sum > 1+1e-9 {
+		t.Errorf("sum of %s modes = %v, want <= 1", schema.SystemCPUUtilization, sum)
+	}
+}
+
+func TestDarwinNoPSI(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(fixtureRoot, "golden.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "system.pressure.") {
+		t.Error("darwin golden contains system.pressure metrics")
+	}
+}
+
+func TestDarwinFilesystemUnknownType(t *testing.T) {
+	points, err := collect(t, darwin.New(realSynthetic(t)), "darwin-filesystem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		mountpoint string
+		fstype     string
+		hasType    bool
+	}{
+		{"/", "", false},
+		{"/Volumes/Backup", schema.SystemFilesystemTypeHfsplus, true},
+		{"/Volumes/USB", schema.SystemFilesystemTypeExfat, true},
+	}
+	for _, tc := range cases {
+		var found bool
+		for _, point := range points {
+			if point.Name != schema.SystemFilesystemUsage {
+				continue
+			}
+			if mount, _ := attrValue(point, schema.AttrSystemFilesystemMountpoint); mount != tc.mountpoint {
+				continue
+			}
+			if state, _ := attrValue(point, schema.AttrSystemFilesystemState); state != schema.SystemFilesystemStateUsed {
+				continue
+			}
+			found = true
+			got, ok := attrValue(point, schema.AttrSystemFilesystemType)
+			if ok != tc.hasType || got != tc.fstype {
+				t.Errorf("%s %s type = %q (present %v), want %q (present %v)", tc.mountpoint, point.Name, got, ok, tc.fstype, tc.hasType)
+			}
+		}
+		if !found {
+			t.Errorf("no %s point for %s", schema.SystemFilesystemUsage, tc.mountpoint)
+		}
+	}
+}
+
+func TestDarwinDiskRejectsUnparsableBytes(t *testing.T) {
+	samples := realSynthetic(t)
+	path := "real-synthetic-01/ioreg.txt"
+	data := samples[path].Data
+	corrupt := bytes.Replace(data, []byte(`"Bytes (Read)"=368261685248`), []byte(`"Bytes (Read)"=botched`), 1)
+	if bytes.Equal(corrupt, data) {
+		t.Fatal("ioreg fixture has no Bytes (Read) counter to corrupt")
+	}
+	samples[path] = &fstest.MapFile{Data: corrupt}
+	if _, err := collect(t, darwin.New(samples), "darwin-disk"); err == nil {
+		t.Fatal("darwin-disk accepted a non-numeric Bytes (Read)")
+	}
+}
+
+func TestDarwinNetworkRejectsUnparsableBytes(t *testing.T) {
+	samples := realSynthetic(t)
+	path := "real-synthetic-01/netstat.txt"
+	data := samples[path].Data
+	corrupt := bytes.Replace(data, []byte("1324567890"), []byte("botched"), 1)
+	if bytes.Equal(corrupt, data) {
+		t.Fatal("netstat fixture has no Ibytes counter to corrupt")
+	}
+	samples[path] = &fstest.MapFile{Data: corrupt}
+	if _, err := collect(t, darwin.New(samples), "darwin-network"); err == nil {
+		t.Fatal("darwin-network accepted a non-numeric Ibytes")
+	}
+}
+
+func TestDarwinFilesystemRejectsMissingDF(t *testing.T) {
+	samples := realSynthetic(t)
+	for _, path := range []string{"real-synthetic-00/df.txt", "real-synthetic-01/df.txt"} {
+		delete(samples, path)
+	}
+	if _, err := collect(t, darwin.New(samples), "darwin-filesystem"); err == nil {
+		t.Fatal("darwin-filesystem accepted fixtures without df.txt")
+	}
+}
+
+func TestDarwinProcessRejectsEmptyPS(t *testing.T) {
+	samples := realSynthetic(t)
+	samples["real-synthetic-01/ps.txt"] = &fstest.MapFile{}
+	if _, err := collect(t, darwin.New(samples), "darwin-process"); err == nil {
+		t.Fatal("darwin-process accepted an empty ps.txt")
+	}
+}
+
+func TestDarwinSensorsRejectsBrokenJSON(t *testing.T) {
+	samples := realSynthetic(t)
+	samples["real-synthetic-01/macmon.json"] = &fstest.MapFile{Data: []byte(`{"temp":`)}
+	if _, err := collect(t, darwin.New(samples), "darwin-sensors"); err == nil {
+		t.Fatal("darwin-sensors accepted broken JSON")
+	}
+}
+
+func attrValue(point schema.Point, key string) (string, bool) {
+	for _, attr := range point.Attrs {
+		if attr.Key == key {
+			return attr.Value, true
+		}
+	}
+	return "", false
 }

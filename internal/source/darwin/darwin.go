@@ -17,10 +17,15 @@ import (
 )
 
 const (
-	cpuInterval       = 15 * time.Second
-	memoryInterval    = 15 * time.Second
-	uptimeInterval    = 4 * time.Second
-	inventoryInterval = 300 * time.Second
+	cpuInterval        = 15 * time.Second
+	memoryInterval     = 15 * time.Second
+	uptimeInterval     = 4 * time.Second
+	inventoryInterval  = 300 * time.Second
+	diskInterval       = 15 * time.Second
+	networkInterval    = 15 * time.Second
+	filesystemInterval = 15 * time.Second
+	processInterval    = 15 * time.Second
+	sensorsInterval    = 30 * time.Second
 )
 
 const hostStatisticsHeader = "# synthetic host_statistics(HOST_CPU_LOAD_INFO)"
@@ -49,13 +54,24 @@ type snapshot struct {
 	idleTicks   float64
 	boot        int64
 	now         int64
+
+	disk        []diskStat
+	network     []networkStat
+	filesystems []filesystemStat
+	process     processStat
+	sensors     sensorsStat
 }
 
 type snapshotErrors struct {
-	sysctl error
-	vmstat error
-	cpu    error
-	clock  error
+	sysctl     error
+	vmstat     error
+	cpu        error
+	clock      error
+	disk       error
+	network    error
+	filesystem error
+	process    error
+	sensors    error
 }
 
 type snapshotSet struct {
@@ -111,6 +127,11 @@ func (s *snapshotSet) parse() {
 		firstError(&s.errs.vmstat, errs.vmstat)
 		firstError(&s.errs.cpu, errs.cpu)
 		firstError(&s.errs.clock, errs.clock)
+		firstError(&s.errs.disk, errs.disk)
+		firstError(&s.errs.network, errs.network)
+		firstError(&s.errs.filesystem, errs.filesystem)
+		firstError(&s.errs.process, errs.process)
+		firstError(&s.errs.sensors, errs.sensors)
 	}
 }
 
@@ -153,6 +174,54 @@ func parseSnapshot(samples fs.FS, dir string) (snapshot, snapshotErrors) {
 		errs.vmstat = err
 	} else {
 		errs.vmstat = parseVMStatSnapshot(&snap, data, dir+"/vm_stat.txt")
+	}
+
+	if data, err := readFile(samples, dir, "ioreg.txt"); err != nil {
+		errs.disk = err
+	} else {
+		snap.disk, errs.disk = parseIOreg(data, dir+"/ioreg.txt")
+	}
+
+	if data, err := readFile(samples, dir, "netstat.txt"); err != nil {
+		errs.network = err
+	} else {
+		snap.network, errs.network = parseNetstat(data, dir+"/netstat.txt")
+	}
+
+	mountData, mountErr := readFile(samples, dir, "mount.txt")
+	dfData, dfErr := readFile(samples, dir, "df.txt")
+	switch {
+	case mountErr != nil:
+		errs.filesystem = mountErr
+	case dfErr != nil:
+		errs.filesystem = dfErr
+	default:
+		snap.filesystems, errs.filesystem = parseFilesystems(mountData, dfData, dir)
+	}
+
+	if data, err := readFile(samples, dir, "ps.txt"); err != nil {
+		errs.process = err
+	} else {
+		snap.process, errs.process = parseProcesses(data, dir+"/ps.txt")
+	}
+	if errs.process == nil && sys != nil {
+		if value, ok := sys["kern.maxproc"]; ok {
+			limit, err := strconv.ParseFloat(value, 64)
+			if err != nil || limit <= 0 {
+				errs.process = fmt.Errorf("%s: kern.maxproc %q: invalid limit", sysctlFile, value)
+			} else {
+				snap.process.limit = limit
+				snap.process.hasLimit = true
+			}
+		}
+	}
+
+	if data, err := readFile(samples, dir, "macmon.json"); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			errs.sensors = err
+		}
+	} else {
+		snap.sensors, errs.sensors = parseSensors(data, dir+"/macmon.json")
 	}
 
 	if boot, err := readEpoch(samples, dir, "boottime.txt"); err != nil {
@@ -546,5 +615,10 @@ func New(samples fs.FS) []source.Source {
 		&memorySource{set: set},
 		&uptimeSource{set: set},
 		&inventorySource{set: set},
+		&diskSource{set: set},
+		&networkSource{set: set},
+		&filesystemSource{set: set},
+		&processSource{set: set},
+		&sensorsSource{set: set},
 	}
 }

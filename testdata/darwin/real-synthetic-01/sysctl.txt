@@ -5,3 +5,4 @@ hw.physicalcpu: 8
 hw.ncpu: 10
 kern.clockrate: { hz = 100, tick = 10000, tickadj = 5, profhz = 100, stathz = 100 }
 vm.swapusage: total = 2048.00M  used = 512.00M  free = 1536.00M  (encrypted)
+kern.maxproc: 4176

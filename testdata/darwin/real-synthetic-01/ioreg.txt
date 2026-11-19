@@ -1,0 +1,12 @@
++-o IOBlockStorageDriver  <class IOBlockStorageDriver, id 0x10000031c, registered, matched, active, busy 0 (2 ms), retain 7>
+    {
+      "Statistics" = {"Bytes (Read)"=368261685248,"Bytes (Write)"=222826323968,"Errors (Read)"=0,"Errors (Write)"=0,"Operations (Read)"=12975224,"Operations (Write)"=13964680,"Retries (Read)"=0,"Retries (Write)"=0,"Total Time (Read)"=3698579261481,"Total Time (Write)"=1213255816800}
+      "IOStorageFeatures" = {"Unmap"=Yes}
+    }
+
+    +-o IOMedia  <class IOMedia, id 0x100000320, registered, matched, active, busy 0 (2 ms), retain 9>
+        {
+          "BSD Name" = "disk0"
+          "Whole" = Yes
+          "Size" = 1000555581440
+        }
