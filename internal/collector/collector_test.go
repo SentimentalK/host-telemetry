@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/SentimentalK/host-telemetry/internal/clockwatch"
 	"github.com/SentimentalK/host-telemetry/internal/collector"
 	"github.com/SentimentalK/host-telemetry/internal/schema"
 	"github.com/SentimentalK/host-telemetry/internal/source"
@@ -51,6 +52,52 @@ func TestPartialFailure(t *testing.T) {
 	}
 	if point.Value != 1 {
 		t.Errorf("%s = %v, want 1", schema.CollectorSourceError, point.Value)
+	}
+}
+
+func TestRunEmitsClockJump(t *testing.T) {
+	base := time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	next := 0
+	wall := func() time.Time {
+		at := base.Add(time.Duration(next) * 10 * time.Millisecond)
+		next++
+		if next >= 2 {
+			at = at.Add(5 * time.Second)
+		}
+		return at
+	}
+	mono := func() time.Time { return base.Add(time.Duration(next-1) * 10 * time.Millisecond) }
+
+	col := collector.New([]source.Source{stubSource{name: "clock-stub", interval: 10 * time.Millisecond}})
+	col.Clock = clockwatch.Watch{Wall: wall, Mono: mono, Threshold: time.Second}
+
+	type jump struct {
+		source string
+		skew   time.Duration
+	}
+	jumps := make(chan jump, 16)
+	col.Jump = func(source string, skew time.Duration) { jumps <- jump{source: source, skew: skew} }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		col.Run(ctx, func(string, []schema.Point, error, time.Duration) {})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	<-done
+
+	select {
+	case got := <-jumps:
+		if got.source != "clock-stub" {
+			t.Errorf("Jump source = %q, want clock-stub", got.source)
+		}
+		if got.skew <= time.Second {
+			t.Errorf("Jump skew = %s, want > 1s", got.skew)
+		}
+	default:
+		t.Fatal("Run did not report a detected clock jump")
 	}
 }
 

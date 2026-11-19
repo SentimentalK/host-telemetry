@@ -48,7 +48,7 @@ func (c *Collector) runSource(ctx context.Context, src source.Source, stats *Sta
 }
 
 func (c *Collector) checkClock(source string) {
-	skew, jumped := c.clock.Step()
+	skew, jumped := c.Clock.Step()
 	if !jumped || c.Jump == nil {
 		return
 	}
