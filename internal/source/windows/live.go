@@ -83,7 +83,7 @@ func (s *liveMemorySource) Collect(ctx context.Context) ([]schema.Point, error) 
 	if err != nil {
 		return nil, err
 	}
-	return memoryPoints(counters), nil
+	return memoryPoints(counters)
 }
 
 type liveUptimeSource struct{}
@@ -158,7 +158,7 @@ func (s *liveFilesystemSource) Collect(ctx context.Context) ([]schema.Point, err
 	if err != nil {
 		return nil, err
 	}
-	return filesystemPoints(volumes), nil
+	return filesystemPoints(volumes)
 }
 
 type liveProcessSource struct {

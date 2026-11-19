@@ -4,6 +4,7 @@ package windows
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -13,10 +14,13 @@ import (
 )
 
 const (
-	pdhMoreData        = 0x800007D2
-	driveFixed         = 3
-	fileReadOnlyVolume = 0x00080000
-	fileSystemNameSize = 261
+	pdhMoreData         = 0x800007D2
+	pdhStatusNoObject   = 0xC0000BB8
+	pdhStatusNoInstance = 0x800007D1
+	pdhStatusNoCounter  = 0xC0000BB9
+	driveFixed          = 3
+	fileReadOnlyVolume  = 0x00080000
+	fileSystemNameSize  = 261
 )
 
 var (
@@ -112,6 +116,9 @@ func (q *nativeQuery) close() {
 }
 
 func (q *nativeQuery) collect() ([]pdhRaw, error) {
+	if len(q.handles) == 0 {
+		return nil, nil
+	}
 	if status, _, _ := pdhCollectQueryData.Call(q.query); status != 0 {
 		return nil, fmt.Errorf("windows: PdhCollectQueryData: %#x", status)
 	}
@@ -159,8 +166,7 @@ func pdhOpen(paths []string) (pdhQuery, error) {
 			}
 			var counter uintptr
 			if status, _, _ := pdhAddEnglishCounterW.Call(query, uintptr(unsafe.Pointer(counterPath)), 0, uintptr(unsafe.Pointer(&counter))); status != 0 {
-				opened.close()
-				return nil, fmt.Errorf("windows: PdhAddEnglishCounterW %s: %#x", path, status)
+				continue
 			}
 			opened.handles = append(opened.handles, pdhHandle{counter: counter, path: path, counterType: spec.counterType})
 		}
@@ -174,8 +180,11 @@ func expandWildcardPath(template string) ([]string, error) {
 		return nil, err
 	}
 	var size uint32
-	status, _, _ := pdhExpandWildCardPathW.Call(0, uintptr(unsafe.Pointer(wildcard)), 0, uintptr(unsafe.Pointer(&size)))
+	status, _, _ := pdhExpandWildCardPathW.Call(0, uintptr(unsafe.Pointer(wildcard)), 0, uintptr(unsafe.Pointer(&size)), 0)
 	if status == 0 {
+		return nil, nil
+	}
+	if noCounterStatus(uint32(status)) {
 		return nil, nil
 	}
 	if uint32(status) != pdhMoreData {
@@ -185,7 +194,10 @@ func expandWildcardPath(template string) ([]string, error) {
 		return nil, nil
 	}
 	buffer := make([]uint16, size)
-	status, _, _ = pdhExpandWildCardPathW.Call(0, uintptr(unsafe.Pointer(wildcard)), uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&size)))
+	status, _, _ = pdhExpandWildCardPathW.Call(0, uintptr(unsafe.Pointer(wildcard)), uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&size)), 0)
+	if noCounterStatus(uint32(status)) {
+		return nil, nil
+	}
 	if status != 0 {
 		return nil, fmt.Errorf("windows: PdhExpandWildCardPathW %s: %#x", template, status)
 	}
@@ -201,6 +213,10 @@ func expandWildcardPath(template string) ([]string, error) {
 	return paths, nil
 }
 
+func noCounterStatus(status uint32) bool {
+	return status == pdhStatusNoObject || status == pdhStatusNoInstance || status == pdhStatusNoCounter
+}
+
 func listVolumes() ([]volumeInfo, error) {
 	length, _, _ := getLogicalDriveStrings.Call(0, 0)
 	if length == 0 {
@@ -211,6 +227,7 @@ func listVolumes() ([]volumeInfo, error) {
 		return nil, fmt.Errorf("windows: GetLogicalDriveStringsW failed")
 	}
 	var volumes []volumeInfo
+	var errs []error
 	for offset := 0; offset < len(buffer) && buffer[offset] != 0; {
 		end := offset
 		for end < len(buffer) && buffer[end] != 0 {
@@ -227,11 +244,12 @@ func listVolumes() ([]volumeInfo, error) {
 		}
 		volume, err := volumeInfoFor(root, rootPtr)
 		if err != nil {
-			return nil, err
+			errs = append(errs, err)
+			continue
 		}
 		volumes = append(volumes, volume)
 	}
-	return volumes, nil
+	return volumes, errors.Join(errs...)
 }
 
 func volumeInfoFor(root string, rootPtr *uint16) (volumeInfo, error) {

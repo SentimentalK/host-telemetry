@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"strings"
 	"time"
 
@@ -107,7 +108,10 @@ func cpuPoints(previous *cpuTimes, current cpuTimes) []schema.Point {
 	)
 }
 
-func memoryPoints(counters memoryCounters) []schema.Point {
+func memoryPoints(counters memoryCounters) ([]schema.Point, error) {
+	if counters.totalPhys <= 0 || math.IsNaN(counters.totalPhys) || math.IsInf(counters.totalPhys, 0) {
+		return nil, fmt.Errorf("windows: total physical memory %v is not positive and finite", counters.totalPhys)
+	}
 	physicalUsed := counters.totalPhys - counters.availPhys
 	points := []schema.Point{
 		schema.NewPoint(schema.SystemMemoryUsage, counters.availPhys, memoryState(schema.SystemMemoryStateAvailable)),
@@ -120,7 +124,7 @@ func memoryPoints(counters memoryCounters) []schema.Point {
 		pagingTotal = 0
 	}
 	if pagingTotal == 0 {
-		return points
+		return points, nil
 	}
 	committed := counters.totalPagefile - counters.availPagefile
 	pagingUsed := committed - physicalUsed
@@ -133,7 +137,7 @@ func memoryPoints(counters memoryCounters) []schema.Point {
 	return append(points,
 		schema.NewPoint(schema.SystemPagingUsage, pagingUsed, pagingState(schema.SystemPagingStateUsed)),
 		schema.NewPoint(schema.SystemPagingUsage, pagingTotal-pagingUsed, pagingState(schema.SystemPagingStateFree)),
-	)
+	), nil
 }
 
 func uptimePoints(milliseconds float64) []schema.Point {
@@ -148,9 +152,14 @@ func inventoryPoints(info cimInfo) []schema.Point {
 	}
 }
 
-func filesystemPoints(volumes []volumeInfo) []schema.Point {
+func filesystemPoints(volumes []volumeInfo) ([]schema.Point, error) {
 	var points []schema.Point
+	var errs []error
 	for _, volume := range volumes {
+		if volume.total <= 0 || math.IsNaN(volume.total) || math.IsInf(volume.total, 0) {
+			errs = append(errs, fmt.Errorf("windows: %s: total size %v is not positive and finite", volume.drive, volume.total))
+			continue
+		}
 		attrs := []schema.Attr{
 			{Key: schema.AttrSystemDeviceName, Value: volume.drive},
 			{Key: schema.AttrSystemFilesystemMountpoint, Value: volume.drive + `\`},
@@ -167,7 +176,7 @@ func filesystemPoints(volumes []volumeInfo) []schema.Point {
 			schema.NewPoint(schema.SystemFilesystemUtilization, volume.free/volume.total, filesystemState(attrs, schema.SystemFilesystemStateFree)...),
 		)
 	}
-	return points
+	return points, errors.Join(errs...)
 }
 
 func filesystemState(attrs []schema.Attr, state string) []schema.Attr {
@@ -225,7 +234,14 @@ func counterPathParts(path string) (class, instance, name string, err error) {
 	if !strings.HasPrefix(path, `\`) {
 		return "", "", "", fmt.Errorf("%s: counter path must start with a backslash", path)
 	}
-	rest := path[1:]
+	rest := strings.TrimLeft(path, `\`)
+	if strings.HasPrefix(path, `\\`) {
+		separator := strings.IndexByte(rest, '\\')
+		if separator < 0 {
+			return "", "", "", fmt.Errorf("%s: counter path has no counter name", path)
+		}
+		rest = rest[separator+1:]
+	}
 	if open := strings.IndexByte(rest, '('); open >= 0 {
 		closing := strings.IndexByte(rest[open:], ')')
 		if closing < 0 {
@@ -233,6 +249,9 @@ func counterPathParts(path string) (class, instance, name string, err error) {
 		}
 		closing += open
 		class = rest[:open]
+		if separator := strings.LastIndexByte(class, '\\'); separator >= 0 {
+			class = class[separator+1:]
+		}
 		instance = rest[open+1 : closing]
 		tail := rest[closing+1:]
 		if !strings.HasPrefix(tail, `\`) {
@@ -240,11 +259,14 @@ func counterPathParts(path string) (class, instance, name string, err error) {
 		}
 		name = tail[1:]
 	} else {
-		separator := strings.IndexByte(rest, '\\')
+		separator := strings.LastIndexByte(rest, '\\')
 		if separator < 0 {
 			return "", "", "", fmt.Errorf("%s: counter path has no counter name", path)
 		}
 		class = rest[:separator]
+		if last := strings.LastIndexByte(class, '\\'); last >= 0 {
+			class = class[last+1:]
+		}
 		name = rest[separator+1:]
 	}
 	if class == "" || name == "" {

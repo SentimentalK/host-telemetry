@@ -386,3 +386,60 @@ func formatPoints(points []schema.Point) string {
 	}
 	return b.String()
 }
+
+func TestWindowsMemoryRejectsZeroTotal(t *testing.T) {
+	samples := fstest.MapFS{
+		"real-synthetic-00/memory-status.txt": &fstest.MapFile{Data: []byte(
+			"total_phys=0\navail_phys=8589934592\ntotal_pagefile=25769803776\navail_pagefile=12884901888\n",
+		)},
+	}
+	points, err := sourceNamed(t, windows.New(samples), "windows-memory").Collect(context.Background())
+	if err == nil {
+		t.Fatal("memory source accepted total_phys=0")
+	}
+	if len(pointsNamed(points, schema.SystemMemoryUtilization)) != 0 {
+		t.Errorf("emitted %s with total_phys=0", schema.SystemMemoryUtilization)
+	}
+}
+
+func TestWindowsFilesystemRejectsZeroTotal(t *testing.T) {
+	samples := fstest.MapFS{
+		"real-synthetic-00/volumes.txt": &fstest.MapFile{Data: []byte(
+			"drive=C:\ttype=NTFS\treadonly=false\ttotal=0\tfree=0\n",
+		)},
+	}
+	if _, err := sourceNamed(t, windows.New(samples), "windows-filesystem").Collect(context.Background()); err == nil {
+		t.Fatal("filesystem source accepted a volume with total=0")
+	}
+}
+
+func TestWindowsProcessorRowsSum(t *testing.T) {
+	samples := fstest.MapFS{
+		"real-synthetic-00/cim-processor.csv": &fstest.MapFile{Data: []byte(
+			"\"Node\",\"NumberOfCores\",\"NumberOfLogicalProcessors\"\n\"HOST\",\"8\",\"16\"\n\"HOST\",\"4\",\"8\"\n",
+		)},
+		"real-synthetic-00/cim-operating-system.csv": &fstest.MapFile{Data: []byte(
+			"\"Node\",\"TotalVisibleMemorySize\",\"MaxNumberOfProcesses\",\"NumberOfProcesses\"\n\"HOST\",\"16777216\",\"4294967295\",\"312\"\n",
+		)},
+	}
+	points, err := sourceNamed(t, windows.New(samples), "windows-inventory").Collect(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range []struct {
+		name string
+		want float64
+	}{
+		{schema.SystemCPUPhysicalCount, 12},
+		{schema.SystemCPULogicalCount, 24},
+	} {
+		point, ok := findPoint(points, check.name, "", "")
+		if !ok {
+			t.Errorf("missing %s", check.name)
+			continue
+		}
+		if point.Value != check.want {
+			t.Errorf("%s = %v, want %v", check.name, point.Value, check.want)
+		}
+	}
+}

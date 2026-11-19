@@ -367,14 +367,18 @@ func parseProcessorCSV(data []byte, file string) (float64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	row := records[len(records)-1]
-	cores, err := parseCell(row, coresIndex, "NumberOfCores", file)
-	if err != nil {
-		return 0, 0, err
-	}
-	logical, err := parseCell(row, logicalIndex, "NumberOfLogicalProcessors", file)
-	if err != nil {
-		return 0, 0, err
+	var cores, logical float64
+	for _, row := range records[1:] {
+		value, err := parseCell(row, coresIndex, "NumberOfCores", file)
+		if err != nil {
+			return 0, 0, err
+		}
+		cores += value
+		value, err = parseCell(row, logicalIndex, "NumberOfLogicalProcessors", file)
+		if err != nil {
+			return 0, 0, err
+		}
+		logical += value
 	}
 	return cores, logical, nil
 }
@@ -443,7 +447,7 @@ func (s *memorySource) Collect(ctx context.Context) ([]schema.Point, error) {
 	if errs.memory != nil {
 		return nil, errs.memory
 	}
-	return memoryPoints(*snaps[len(snaps)-1].memory), nil
+	return memoryPoints(*snaps[len(snaps)-1].memory)
 }
 
 type uptimeSource struct{ set *fixtureSet }
@@ -511,7 +515,7 @@ func (s *filesystemSource) Collect(ctx context.Context) ([]schema.Point, error) 
 	if errs.volumes != nil {
 		return nil, errs.volumes
 	}
-	return filesystemPoints(snaps[len(snaps)-1].volumes), nil
+	return filesystemPoints(snaps[len(snaps)-1].volumes)
 }
 
 type processSource struct{ set *fixtureSet }
