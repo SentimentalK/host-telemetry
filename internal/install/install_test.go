@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -156,5 +157,25 @@ func TestRender(t *testing.T) {
 	}
 	if !strings.Contains(got, "exec systemctl --user enable --now host-telemetry") {
 		t.Fatalf("Render missing enable command:\n%s", got)
+	}
+}
+
+func TestDefaultTargetPlatform(t *testing.T) {
+	target := DefaultTarget()
+	if target.Platform != runtime.GOOS {
+		t.Fatalf("Platform = %q, want %q", target.Platform, runtime.GOOS)
+	}
+	if target.User != (os.Geteuid() != 0) {
+		t.Fatalf("User = %v, want %v", target.User, os.Geteuid() != 0)
+	}
+
+	system := Target{Platform: "darwin"}
+	if got, want := system.StateDir(), "/Library/Application Support/host-telemetry"; got != want {
+		t.Fatalf("darwin system StateDir = %q, want %q", got, want)
+	}
+	home := "/Users/tester"
+	user := Target{Platform: "darwin", User: true, Home: home}
+	if got, want := user.StateDir(), filepath.Join(home, "Library", "Application Support", "host-telemetry"); got != want {
+		t.Fatalf("darwin user StateDir = %q, want %q", got, want)
 	}
 }

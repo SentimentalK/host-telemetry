@@ -125,8 +125,8 @@ func TestLaunchdUserPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(actions) != 5 {
-		t.Fatalf("actions = %d, want 5", len(actions))
+	if len(actions) != 6 {
+		t.Fatalf("actions = %d, want 6", len(actions))
 	}
 
 	base := filepath.Join(home, "Library", "Application Support", "host-telemetry")
@@ -140,15 +140,19 @@ func TestLaunchdUserPlan(t *testing.T) {
 	}
 	checkPlist(t, plistAction.Content, "/usr/local/bin/host-telemetry", filepath.Join(base, "config.yaml"), base, filepath.Join(base, "host-telemetry.log"))
 
+	bootout := actions[2]
+	if bootout.Kind != "exec" || !bootout.IgnoreError || strings.Join(bootout.Command, " ") != "launchctl bootout gui/501/dev.host-telemetry" {
+		t.Fatalf("bootout action = %+v", bootout)
+	}
 	wantCommands := [][]string{
 		{"launchctl", "bootstrap", "gui/501", wantPlist},
 		{"launchctl", "enable", "gui/501/dev.host-telemetry"},
 		{"launchctl", "kickstart", "-k", "gui/501/dev.host-telemetry"},
 	}
 	for i, want := range wantCommands {
-		got := actions[2+i]
-		if got.Kind != "exec" || strings.Join(got.Command, " ") != strings.Join(want, " ") {
-			t.Fatalf("action %d = %+v, want %q", 2+i, got, want)
+		got := actions[3+i]
+		if got.Kind != "exec" || got.IgnoreError || strings.Join(got.Command, " ") != strings.Join(want, " ") {
+			t.Fatalf("action %d = %+v, want %q", 3+i, got, want)
 		}
 	}
 }
@@ -159,8 +163,8 @@ func TestLaunchdSystemPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(actions) != 5 {
-		t.Fatalf("actions = %d, want 5", len(actions))
+	if len(actions) != 6 {
+		t.Fatalf("actions = %d, want 6", len(actions))
 	}
 
 	base := "/Library/Application Support/host-telemetry"
@@ -174,15 +178,19 @@ func TestLaunchdSystemPlan(t *testing.T) {
 	}
 	checkPlist(t, plistAction.Content, "/usr/local/bin/host-telemetry", filepath.Join(base, "config.yaml"), base, filepath.Join(base, "host-telemetry.log"))
 
+	bootout := actions[2]
+	if bootout.Kind != "exec" || !bootout.IgnoreError || strings.Join(bootout.Command, " ") != "launchctl bootout system/dev.host-telemetry" {
+		t.Fatalf("bootout action = %+v", bootout)
+	}
 	wantCommands := [][]string{
 		{"launchctl", "bootstrap", "system", wantPlist},
 		{"launchctl", "enable", "system/dev.host-telemetry"},
 		{"launchctl", "kickstart", "-k", "system/dev.host-telemetry"},
 	}
 	for i, want := range wantCommands {
-		got := actions[2+i]
-		if got.Kind != "exec" || strings.Join(got.Command, " ") != strings.Join(want, " ") {
-			t.Fatalf("action %d = %+v, want %q", 2+i, got, want)
+		got := actions[3+i]
+		if got.Kind != "exec" || got.IgnoreError || strings.Join(got.Command, " ") != strings.Join(want, " ") {
+			t.Fatalf("action %d = %+v, want %q", 3+i, got, want)
 		}
 	}
 }

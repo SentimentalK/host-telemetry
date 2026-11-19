@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -15,6 +16,10 @@ import (
 )
 
 const launchdLabel = "dev.host-telemetry"
+
+func DefaultTarget() Target {
+	return Target{Platform: runtime.GOOS, User: os.Geteuid() != 0}
+}
 
 type Target struct {
 	Platform      string
@@ -28,11 +33,12 @@ type Target struct {
 }
 
 type Action struct {
-	Kind    string
-	Path    string
-	Mode    string
-	Content string
-	Command []string
+	Kind        string
+	Path        string
+	Mode        string
+	Content     string
+	Command     []string
+	IgnoreError bool
 }
 
 func (t Target) ConfigPath() string {
@@ -158,6 +164,7 @@ func planLaunchd(t Target, data []byte) []Action {
 	return []Action{
 		{Kind: "write", Path: t.ConfigPath(), Mode: "0600", Content: string(data)},
 		{Kind: "write", Path: t.UnitPath(), Mode: "0644", Content: renderPlist(t)},
+		{Kind: "exec", Command: []string{"launchctl", "bootout", domain + "/" + launchdLabel}, IgnoreError: true},
 		{Kind: "exec", Command: []string{"launchctl", "bootstrap", domain, t.UnitPath()}},
 		{Kind: "exec", Command: []string{"launchctl", "enable", domain + "/" + launchdLabel}},
 		{Kind: "exec", Command: []string{"launchctl", "kickstart", "-k", domain + "/" + launchdLabel}},
@@ -193,7 +200,7 @@ func Apply(actions []Action) error {
 			cmd := exec.Command(action.Command[0], action.Command[1:]...)
 			cmd.Stdout = os.Stderr
 			cmd.Stderr = os.Stderr
-			if err := cmd.Run(); err != nil {
+			if err := cmd.Run(); err != nil && !action.IgnoreError {
 				return err
 			}
 		default:
@@ -212,7 +219,11 @@ func Render(w io.Writer, actions []Action) {
 				fmt.Fprintln(w)
 			}
 		case "exec":
-			fmt.Fprintf(w, "exec %s\n", strings.Join(action.Command, " "))
+			prefix := "exec"
+			if action.IgnoreError {
+				prefix = "exec (ignore-errors)"
+			}
+			fmt.Fprintf(w, "%s %s\n", prefix, strings.Join(action.Command, " "))
 		}
 	}
 }

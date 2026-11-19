@@ -37,6 +37,27 @@ func IOPlatformUUID(run func(name string, args ...string) ([]byte, error)) (stri
 	return uuid, nil
 }
 
+func DarwinOS(run func(name string, args ...string) ([]byte, error)) (string, string, error) {
+	versionOut, err := run("sw_vers", "-productVersion")
+	if err != nil {
+		return "", "", err
+	}
+	version := strings.TrimSpace(string(versionOut))
+	name := ""
+	if out, err := run("sw_vers", "-productName"); err == nil {
+		name = strings.TrimSpace(string(out))
+	}
+	build := ""
+	if out, err := run("sw_vers", "-buildVersion"); err == nil {
+		build = strings.TrimSpace(string(out))
+	}
+	description := name + " " + version
+	if build != "" {
+		description += " (" + build + ")"
+	}
+	return version, description, nil
+}
+
 func parseIOPlatformUUID(output string) (string, bool) {
 	for _, line := range strings.Split(output, "\n") {
 		key, value, ok := strings.Cut(line, "=")

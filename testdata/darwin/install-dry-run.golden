@@ -36,6 +36,7 @@ write /Library/LaunchDaemons/dev.host-telemetry.plist (0644)
 	<string>/Library/Application Support/host-telemetry/host-telemetry.log</string>
 </dict>
 </plist>
+exec (ignore-errors) launchctl bootout system/dev.host-telemetry
 exec launchctl bootstrap system /Library/LaunchDaemons/dev.host-telemetry.plist
 exec launchctl enable system/dev.host-telemetry
 exec launchctl kickstart -k system/dev.host-telemetry

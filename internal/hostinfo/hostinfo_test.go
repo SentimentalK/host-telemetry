@@ -96,3 +96,49 @@ func TestIOPlatformUUID(t *testing.T) {
 		}
 	}
 }
+
+func TestDarwinOS(t *testing.T) {
+	responses := map[string]string{
+		"-productVersion": "14.6.1",
+		"-productName":    "macOS",
+		"-buildVersion":   "23G93",
+	}
+	run := func(name string, args ...string) ([]byte, error) {
+		if name != "sw_vers" || len(args) != 1 {
+			t.Fatalf("unexpected command %q %q", name, args)
+		}
+		out, ok := responses[args[0]]
+		if !ok {
+			return nil, errors.New("unexpected flag")
+		}
+		return []byte(out + "\n"), nil
+	}
+	version, description, err := DarwinOS(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "14.6.1" || description != "macOS 14.6.1 (23G93)" {
+		t.Fatalf("version = %q, description = %q", version, description)
+	}
+
+	noBuild := func(name string, args ...string) ([]byte, error) {
+		if args[0] == "-buildVersion" {
+			return nil, errors.New("sw_vers: failed")
+		}
+		return []byte(responses[args[0]] + "\n"), nil
+	}
+	version, description, err = DarwinOS(noBuild)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "14.6.1" || description != "macOS 14.6.1" {
+		t.Fatalf("missing build: version = %q, description = %q", version, description)
+	}
+
+	failVersion := func(name string, args ...string) ([]byte, error) {
+		return nil, errors.New("sw_vers: failed")
+	}
+	if _, _, err := DarwinOS(failVersion); err == nil {
+		t.Fatal("productVersion failure returned no error")
+	}
+}

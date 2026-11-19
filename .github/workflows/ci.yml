@@ -11,4 +11,6 @@ jobs:
       - run: make generate && git diff --exit-code
       - run: make test
       - run: make lint
+      - run: GOOS=darwin GOARCH=arm64 go build ./...
+      - run: GOOS=darwin GOARCH=amd64 go build ./...
       - run: make budget

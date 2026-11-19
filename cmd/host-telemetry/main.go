@@ -126,7 +126,7 @@ func run(args []string) {
 		pool.Stats.Record(src.Name(), 0)
 	}
 
-	eventsPath := filepath.Join(install.Target{User: os.Geteuid() != 0}.StateDir(), "events.ndjson")
+	eventsPath := filepath.Join(install.DefaultTarget().StateDir(), "events.ndjson")
 	if err := os.MkdirAll(filepath.Dir(eventsPath), 0o700); err != nil {
 		log.Printf("events: %v", err)
 	}
@@ -148,6 +148,13 @@ func run(args []string) {
 		hostName, _ = hostinfo.Name()
 	}
 	osType, osVersion, osDescription := hostinfo.OS(root)
+	if *fixturesDir == "" && runtime.GOOS == "darwin" {
+		if version, description, err := hostinfo.DarwinOS(func(name string, args ...string) ([]byte, error) {
+			return exec.Command(name, args...).Output()
+		}); err == nil {
+			osVersion, osDescription = version, description
+		}
+	}
 	resource := otlp.Resource{
 		HostID:         hostID,
 		HostName:       hostName,
@@ -255,21 +262,22 @@ func loadSources(fixtureRoot, platform, sensors string) ([]source.Source, error)
 }
 
 func defaultWALDir() string {
-	return filepath.Join(install.Target{User: os.Geteuid() != 0}.StateDir(), "wal")
+	return filepath.Join(install.DefaultTarget().StateDir(), "wal")
 }
 
 func defaultConfigPath() string {
-	return install.Target{User: os.Geteuid() != 0}.ConfigPath()
+	return install.DefaultTarget().ConfigPath()
 }
 
 func provision(name string, args []string) {
 	flags := flag.NewFlagSet(name, flag.ExitOnError)
 	endpoint := flags.String("endpoint", "", "OTLP/HTTP endpoint")
 	token := flags.String("token", "", "bearer token")
-	user := flags.Bool("user", false, "install a systemd user unit")
+	user := flags.Bool("user", false, "install a user-scoped service")
 	dryRun := flags.Bool("dry-run", false, "print actions without applying them")
 	platform := flags.String("platform", runtime.GOOS, "target platform")
 	hostIDOverride := flags.String("host-id", "", "override the resolved host id")
+	sensors := flags.String("sensors", "", "sensor backend; macmon enables darwin sensors")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -294,6 +302,7 @@ func provision(name string, args []string) {
 		Token:    *token,
 		HostID:   hostID,
 		HostName: hostName,
+		Sensors:  *sensors,
 	}
 	actions, err := install.Plan(install.Target{Platform: *platform, User: *user, Executable: executable}, cfg)
 	if err != nil {
