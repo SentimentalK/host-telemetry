@@ -159,6 +159,10 @@ failure is reported on the next collection; the previous snapshot is kept. The f
 | `workload.memory.usage` | UpDownCounter | `By` | `workload.id`, `workload.project` | all | 15s | **cgroup v2 `memory.current` on Linux — the only non-double-counted number** |
 | `workload.pressure.utilization` | Gauge | `1` | `workload.id`, `system.pressure.resource` | L | 15s | `memory.pressure` per scope: which agent was being throttled, not just which was big |
 
+- cgroup v2 scope attribution wins over process-tree matching for the pids it covers.
+- `memory.current` includes page cache; file-backed pages may be charged to another cgroup (measured: `sleep` differs by 82%, a 200 MB anonymous process by 0.6%).
+- process-tree RSS double-counts shared pages and must never be summed into host totals.
+
 ## Process detail (opt-in, bounded)
 
 Off by default. When enabled, only whitelisted executables and their recursive children, capped at

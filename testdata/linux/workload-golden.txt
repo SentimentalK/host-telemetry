@@ -1,0 +1,15 @@
+workload.count|workload.kind=agent,workload.state=working|3
+workload.cpu.time|cpu.mode=nice,workload.id=orca_pty_d_1|0
+workload.cpu.time|cpu.mode=nice,workload.id=test-agent-1|0
+workload.cpu.time|cpu.mode=system,workload.id=agent#100|0.15
+workload.cpu.time|cpu.mode=system,workload.id=orca_pty_d_1|0.5
+workload.cpu.time|cpu.mode=system,workload.id=test-agent-1|0
+workload.cpu.time|cpu.mode=user,workload.id=agent#100|0.7
+workload.cpu.time|cpu.mode=user,workload.id=orca_pty_d_1|1
+workload.cpu.time|cpu.mode=user,workload.id=test-agent-1|2
+workload.memory.usage|workload.id=agent#100|14680064
+workload.memory.usage|workload.id=orca_pty_d_1|104857600
+workload.memory.usage|workload.id=test-agent-1|52428800
+workload.pressure.utilization|system.pressure.resource=cpu,workload.id=orca_pty_d_1|0.01
+workload.pressure.utilization|system.pressure.resource=io,workload.id=orca_pty_d_1|0
+workload.pressure.utilization|system.pressure.resource=memory,workload.id=orca_pty_d_1|0.025

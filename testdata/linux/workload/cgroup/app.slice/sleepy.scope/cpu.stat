@@ -1,0 +1,4 @@
+usage_usec 1000
+user_usec 1000
+system_usec 0
+nice_usec 0

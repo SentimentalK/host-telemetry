@@ -33,6 +33,7 @@ import (
 	"github.com/SentimentalK/host-telemetry/internal/source/linux"
 	"github.com/SentimentalK/host-telemetry/internal/source/windows"
 	"github.com/SentimentalK/host-telemetry/internal/wal"
+	"github.com/SentimentalK/host-telemetry/internal/workload"
 )
 
 const ServiceVersion = "dev"
@@ -75,6 +76,9 @@ func run(args []string) {
 	sensors := flags.String("sensors", "", "sensor backend; macmon enables darwin sensors")
 	walDir := flags.String("wal-dir", defaultWALDir(), "write-ahead log directory")
 	configPath := flags.String("config", defaultConfigPath(), "config file path")
+	workloadEnabled := flags.Bool("workload", false, "enable workload attribution")
+	workloadCgroups := flags.Bool("workload-cgroups", true, "read cgroup v2 scopes")
+	workloadExecutables := flags.String("workload-executables", "", "comma-separated process executable whitelist")
 	if err := flags.Parse(args); err != nil {
 		os.Exit(2)
 	}
@@ -102,17 +106,29 @@ func run(args []string) {
 	if !set["sensors"] && cfg.Sensors != "" {
 		*sensors = cfg.Sensors
 	}
+	if !set["workload"] && cfg.Workload.Enabled {
+		*workloadEnabled = true
+	}
+	if !set["workload-cgroups"] && cfg.Workload.Cgroups != nil {
+		*workloadCgroups = *cfg.Workload.Cgroups
+	}
+	if !set["workload-executables"] && cfg.Workload.Executables != nil {
+		*workloadExecutables = strings.Join(cfg.Workload.Executables, ",")
+	}
 
 	opts := serveOptions{
-		Fixtures: *fixturesDir,
-		Platform: *platform,
-		Listen:   *listen,
-		Endpoint: *endpoint,
-		Token:    *token,
-		Sensors:  *sensors,
-		WALDir:   *walDir,
-		HostID:   cfg.HostID,
-		HostName: cfg.HostName,
+		Fixtures:            *fixturesDir,
+		Platform:            *platform,
+		Listen:              *listen,
+		Endpoint:            *endpoint,
+		Token:               *token,
+		Sensors:             *sensors,
+		WALDir:              *walDir,
+		HostID:              cfg.HostID,
+		HostName:            cfg.HostName,
+		Workload:            *workloadEnabled,
+		WorkloadCgroups:     *workloadCgroups,
+		WorkloadExecutables: splitExecutables(*workloadExecutables),
 	}
 	if isWindowsService() {
 		if err := runWindowsService(opts); err != nil {
@@ -128,15 +144,28 @@ func run(args []string) {
 }
 
 type serveOptions struct {
-	Fixtures string
-	Platform string
-	Listen   string
-	Endpoint string
-	Token    string
-	Sensors  string
-	WALDir   string
-	HostID   string
-	HostName string
+	Fixtures            string
+	Platform            string
+	Listen              string
+	Endpoint            string
+	Token               string
+	Sensors             string
+	WALDir              string
+	HostID              string
+	HostName            string
+	Workload            bool
+	WorkloadCgroups     bool
+	WorkloadExecutables []string
+}
+
+func splitExecutables(value string) []string {
+	list := make([]string, 0)
+	for _, part := range strings.Split(value, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			list = append(list, part)
+		}
+	}
+	return list
 }
 
 func serve(ctx context.Context, opts serveOptions) error {
@@ -147,6 +176,17 @@ func serve(ctx context.Context, opts serveOptions) error {
 	sources, err := loadSources(opts.Fixtures, opts.Platform, opts.Sensors)
 	if err != nil {
 		return err
+	}
+	if opts.Workload {
+		cgroupRoot, procRoot := "/sys/fs/cgroup", "/"
+		if opts.Fixtures != "" {
+			cgroupRoot = filepath.Join(opts.Fixtures, opts.Platform, "workload", "cgroup")
+			procRoot = filepath.Join(opts.Fixtures, opts.Platform, "workload")
+		}
+		sources = append(sources, workload.New(os.DirFS(cgroupRoot), os.DirFS(procRoot), workload.Options{
+			Cgroups:     opts.WorkloadCgroups,
+			Executables: opts.WorkloadExecutables,
+		}))
 	}
 
 	var store *wal.Store

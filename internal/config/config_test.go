@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -31,7 +32,7 @@ func TestSaveModeAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Load = %+v, want %+v", got, want)
 	}
 }
@@ -41,7 +42,7 @@ func TestLoadNotExist(t *testing.T) {
 	if !errors.Is(err, ErrNotExist) {
 		t.Fatalf("err = %v, want ErrNotExist", err)
 	}
-	if got != (Config{}) {
+	if !reflect.DeepEqual(got, Config{}) {
 		t.Fatalf("config = %+v, want zero", got)
 	}
 }
@@ -56,7 +57,36 @@ func TestWithEnvOverridesNonEmpty(t *testing.T) {
 	}
 	got := base.WithEnv(func(key string) string { return env[key] })
 	want := Config{Endpoint: "http://env", Token: "config", Listen: "0.0.0.0:1", WALDir: "config"}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("WithEnv = %+v, want %+v", got, want)
+	}
+}
+
+func TestWithEnvWorkload(t *testing.T) {
+	base := Config{Workload: WorkloadConfig{Executables: []string{"from-config"}}}
+	env := map[string]string{
+		"HT_WORKLOAD_ENABLED":     "true",
+		"HT_WORKLOAD_CGROUPS":     "false",
+		"HT_WORKLOAD_EXECUTABLES": " agent , worker ,",
+	}
+	got := base.WithEnv(func(key string) string { return env[key] })
+	if !got.Workload.Enabled {
+		t.Fatalf("Enabled = false, want true")
+	}
+	if got.Workload.Cgroups == nil || *got.Workload.Cgroups {
+		t.Fatalf("Cgroups = %v, want false", got.Workload.Cgroups)
+	}
+	if want := []string{"agent", "worker"}; !reflect.DeepEqual(got.Workload.Executables, want) {
+		t.Fatalf("Executables = %v, want %v", got.Workload.Executables, want)
+	}
+}
+
+func TestWorkloadCgroupsDefaultsToNil(t *testing.T) {
+	got := Config{}.WithEnv(func(string) string { return "" })
+	if got.Workload.Cgroups != nil {
+		t.Fatalf("Cgroups = %v, want nil", got.Workload.Cgroups)
+	}
+	if got.Workload.Enabled {
+		t.Fatalf("Enabled = true, want false")
 	}
 }

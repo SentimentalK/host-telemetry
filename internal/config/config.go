@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,13 +14,20 @@ import (
 var ErrNotExist = fs.ErrNotExist
 
 type Config struct {
-	Endpoint string `yaml:"endpoint"`
-	Token    string `yaml:"token"`
-	HostID   string `yaml:"host_id"`
-	HostName string `yaml:"host_name"`
-	Listen   string `yaml:"listen"`
-	WALDir   string `yaml:"wal_dir"`
-	Sensors  string `yaml:"sensors"`
+	Endpoint string         `yaml:"endpoint"`
+	Token    string         `yaml:"token"`
+	HostID   string         `yaml:"host_id"`
+	HostName string         `yaml:"host_name"`
+	Listen   string         `yaml:"listen"`
+	WALDir   string         `yaml:"wal_dir"`
+	Sensors  string         `yaml:"sensors"`
+	Workload WorkloadConfig `yaml:"workload,omitempty"`
+}
+
+type WorkloadConfig struct {
+	Enabled     bool     `yaml:"enabled"`
+	Cgroups     *bool    `yaml:"cgroups"`
+	Executables []string `yaml:"executables"`
 }
 
 func Load(path string) (Config, error) {
@@ -89,5 +98,28 @@ func (c Config) WithEnv(getenv func(string) string) Config {
 	if v := getenv("HT_SENSORS"); v != "" {
 		c.Sensors = v
 	}
+	if v := getenv("HT_WORKLOAD_ENABLED"); v != "" {
+		if enabled, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			c.Workload.Enabled = enabled
+		}
+	}
+	if v := getenv("HT_WORKLOAD_CGROUPS"); v != "" {
+		if cgroups, err := strconv.ParseBool(strings.TrimSpace(v)); err == nil {
+			c.Workload.Cgroups = &cgroups
+		}
+	}
+	if v := getenv("HT_WORKLOAD_EXECUTABLES"); v != "" {
+		c.Workload.Executables = splitList(v)
+	}
 	return c
+}
+
+func splitList(value string) []string {
+	list := make([]string, 0)
+	for _, part := range strings.Split(value, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			list = append(list, part)
+		}
+	}
+	return list
 }
