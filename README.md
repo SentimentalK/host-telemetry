@@ -6,8 +6,9 @@ One binary per machine. One schema for every OS. Installed at boot. Queryable by
 curl -fsSL https://get.host-telemetry.dev | sh -s -- --endpoint https://<tsdb>:8428 --token $HT_TOKEN
 ```
 
-**Status: Linux M1 implemented, pre-alpha.** Linux sources, WAL/OTLP transport and the systemd
-installer exist today; macOS and Windows are still contract-only. The contract in this document is
+**Status: Linux, macOS and Windows sources implemented, pre-alpha.** Linux sources, WAL/OTLP
+transport and the systemd installer exist today; macOS and Windows source, installer and service
+code are implemented but have not been verified on real hardware. The contract in this document is
 what every implementation must satisfy; read `AGENTS.md` before writing code.
 
 ---

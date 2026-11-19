@@ -28,3 +28,28 @@
 - 硬件温度、风扇：无稳定的 Win32 接口。
 - `system.disk.operation_time`：fixture 不合成 `% Disk Time` 的 raw 计数。
 - PDH 32 位回绕：fixture 只验证单调增长的 64 位 raw 值。
+
+## 未真机验证（逐项）
+
+以下检查需要 Windows 真机或 VM，当前环境（Linux）无法执行；fixture 与 `GOOS=windows` 编译只覆盖代码路径。
+
+1. 服务注册与失败重启
+   - 验证命令：`sc qc host-telemetry`、`sc qfailure host-telemetry`。
+   - 期望：`START_TYPE` 为 `AUTO_START`，依赖含 `Tcpip`；失败动作为 5 s、15 s、60 s 依次 restart，`RESET_PERIOD` 为 24 小时。
+   - 当前状态：未执行。
+2. 干净停止与硬断电
+   - 验证命令：安装服务后 `sc stop host-telemetry`，检查 WAL 是否重放；硬断电无法用命令模拟。
+   - 期望：干净 Stop 由 `TestServeShutdownPreservesWAL` 覆盖，不丢已确认写入。硬断电未验证——WAL 不逐批 fsync，页缓存丢失可能丢掉最后一批写入，因此不能声称通过。
+   - 当前状态：未执行（干净停止只有进程内测试证据）。
+3. PDH 计数器实机名与数值
+   - 验证命令：运行 `host-telemetry run --listen 127.0.0.1:19101`，抓取 `/metrics` 确认 `collector.source.error` 为 0；同时运行 `typeperf "\PhysicalDisk(*)\Disk Read Bytes/sec"`，用速率 ×15 s 与 counter 差分对照。
+   - 期望：英文计数器路径可解析；counter 差分与速率 × 采样间隔同量级。
+   - 当前状态：未执行。
+4. `MachineGuid` 与 `host.id`
+   - 验证命令：`reg query HKLM\SOFTWARE\Microsoft\Cryptography /v MachineGuid`，与 `host-telemetry install --dry-run` 输出的 `host.id=` 对照。
+   - 期望：两者一致（大小写不敏感）。
+   - 当前状态：未执行。
+5. `IOCTL_DISK_PERFORMANCE`
+   - 验证命令：无，本实现不使用该接口。
+   - 期望：不适用。拒绝原因：关闭句柄会清零计数器，且需要管理员权限。
+   - 当前状态：其可用性与权限要求未验证。

@@ -27,7 +27,7 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `system.disk.io` | Counter | `By` | `disk.io.direction=read\|write`, `system.device.name` | L M W | 15s | Throughput, not latency |
 | `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device.name` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
 | `system.disk.io_time` | Counter | `s` | `system.device.name` | L | 15s | Busy-time; the closest portable `%util` |
-| `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device.name` | L M W | 15s | Divide by operations for latency — the metric people actually need |
+| `system.disk.operation_time` | Counter | `s` | `disk.io.direction`, `system.device.name` | L M | 15s | Divide by operations for latency — the metric people actually need |
 | `system.filesystem.usage` | UpDownCounter | `By` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 15s | Disk-full is a classic silent failure |
 | `system.filesystem.utilization` | Gauge | `1` | `system.device.name`, `system.filesystem.state=used\|free\|reserved`, `system.filesystem.type`, `system.filesystem.mode`, `system.filesystem.mountpoint` | L M W | 15s | Derived, but cheap to keep for alerts |
 
@@ -50,13 +50,13 @@ design decision, not an unfinished item; unifying the two platforms requires a s
 
 | Metric | Type | Unit | Attributes | Platform | Interval | Why it exists |
 |---|---|---|---|---|---|---|
-| `hw.temperature` | Gauge | `Cel` | `hw.id`, `hw.name`, `hw.sensor_location`, `hw.parent` | L M W | 30s | Context, not a diagnosis — always read next to frequency |
+| `hw.temperature` | Gauge | `Cel` | `hw.id`, `hw.name`, `hw.sensor_location`, `hw.parent` | L M | 30s | Context, not a diagnosis — always read next to frequency |
 | `hw.temperature.limit` | Gauge | `Cel` | + `hw.limit_type=high.critical\|high.degraded\|throttled` | — | — | Gives a normalized distance-to-throttle |
-| `hw.fan.speed` | Gauge | `rpm` | `hw.id`, `hw.name`, `hw.sensor_location` | L M W | 30s | Fans pinned at max + falling frequency = thermal wall |
-| `hw.fan.speed_ratio` | Gauge | `1` | same | L M W | 30s | Portable across 2-fan laptops and 8-fan servers |
+| `hw.fan.speed` | Gauge | `rpm` | `hw.id`, `hw.name`, `hw.sensor_location` | L M | 30s | Fans pinned at max + falling frequency = thermal wall |
+| `hw.fan.speed_ratio` | Gauge | `1` | same | L M | 30s | Portable across 2-fan laptops and 8-fan servers |
 | `hw.fan.speed.limit` | Gauge | `rpm` | + `hw.limit_type` | M | 30s | Denominator for the ratio when the OS does not provide it |
 | `hw.status` | UpDownCounter | `1` | `hw.id`, `hw.name`, `hw.parent`, `hw.type=fan\|temperature\|cpu`, `hw.state=ok\|degraded\|failed`, `hw.sensor_location` | — | — | The portable way to report "throttled" without inventing a metric (`hw.limit_type=throttled`) |
-| `hw.power` | Gauge | `W` | `hw.id`, `hw.name`, `hw.parent`, `hw.type` | L M W | 30s | Package power tells whether the SoC is power-limited rather than thermally limited |
+| `hw.power` | Gauge | `W` | `hw.id`, `hw.name`, `hw.parent`, `hw.type` | L M | 30s | Package power tells whether the SoC is power-limited rather than thermally limited |
 
 Linux sysfs sensor reads (`temp*_input`, `fan*_input`, `power*_input`, `scaling_cur_freq`) run in
 the background when `linux-hwmon` is collected: `Collect` waits at most 5 ms for the refresh and
@@ -89,6 +89,67 @@ failure is reported on the next collection; the previous snapshot is kept. The f
   source, not because their value is zero; `hw.fan.speed.limit` comes only from macmon's `max_rpm`.
 - The darwin fixtures are synthetic and live collection has not been verified on real hardware; see
   `testdata/darwin/README.md` and HT-004 for fixture provenance and the remaining boundaries.
+
+### Windows notes
+
+- Intervals: `windows-cpu`, `windows-memory`, `windows-disk`, `windows-network`, `windows-filesystem`
+  and `windows-process` 15 s, `windows-uptime` 4 s, `windows-inventory` 300 s. The inventory source
+  carries `system.cpu.logical.count`, `system.cpu.physical.count` and `system.memory.limit`.
+- Disk and network counters are read from PDH with English paths and `PdhGetRawCounterValue`. The raw
+  `FirstValue` is written to the counter as-is: no rate is multiplied by the interval, so the series
+  keep normal cumulative-counter semantics. A counter whose `CounterType` does not match the
+  expected value is not emitted; the source returns an error and `collector.source.error` exposes it.
+
+| PDH English path | CounterType | Raw semantics | Metric |
+|---|---|---|---|
+| `\PhysicalDisk(*)\Disk Read Bytes/sec` | 272696576 | cumulative bytes read | `system.disk.io{disk.io.direction=read}` |
+| `\PhysicalDisk(*)\Disk Write Bytes/sec` | 272696576 | cumulative bytes written | `system.disk.io{disk.io.direction=write}` |
+| `\PhysicalDisk(*)\Disk Reads/sec` | 272696320 | cumulative read operations | `system.disk.operations{disk.io.direction=read}` |
+| `\PhysicalDisk(*)\Disk Writes/sec` | 272696320 | cumulative write operations | `system.disk.operations{disk.io.direction=write}` |
+| `\Network Interface(*)\Bytes Received/sec` | 272696576 | cumulative bytes received | `system.network.io{network.io.direction=receive}` |
+| `\Network Interface(*)\Bytes Sent/sec` | 272696576 | cumulative bytes sent | `system.network.io{network.io.direction=transmit}` |
+| `\Network Interface(*)\Packets Received Errors` | 272696320 | cumulative receive errors | `system.network.errors{network.io.direction=receive}` |
+| `\Network Interface(*)\Packets Outbound Errors` | 272696320 | cumulative transmit errors | `system.network.errors{network.io.direction=transmit}` |
+| `\Network Interface(*)\Packets Received/sec` | 272696320 | cumulative packets received | `system.network.packet.count{network.io.direction=receive}` |
+| `\Network Interface(*)\Packets Sent/sec` | 272696320 | cumulative packets sent | `system.network.packet.count{network.io.direction=transmit}` |
+| `\Network Interface(*)\Packets Received Discarded` | 272696320 | cumulative dropped receive packets | `system.network.packet.dropped{network.io.direction=receive}` |
+| `\Network Interface(*)\Packets Outbound Discarded` | 272696320 | cumulative dropped transmit packets | `system.network.packet.dropped{network.io.direction=transmit}` |
+| `\System\Processes` | 65536 | current process count (gauge) | `system.process.count` |
+
+  `_Total` disk instances are skipped. When a PDH English counter is missing the whole group is
+  absent rather than an error. Paths are written unescaped; their Go/JSON string-literal form uses
+  `\\PhysicalDisk(*)\\Disk Read Bytes/sec` and `\\System\\Processes`.
+- Collector restarts do not reset the counters: every collection reads the OS's cumulative total. An
+  OS reboot resets them to zero, which must be handled as a counter reset; the collector does not
+  compensate across the reboot, and `system.uptime` identifies it. 32-bit `PERF_COUNTER_COUNTER`
+  values wrap after 2^32, a known limitation.
+- `typeperf` is not used: its formatted `/sec` output cannot be turned back into cumulative
+  counters. `IOCTL_DISK_PERFORMANCE` is not used either — closing the handle resets the counters and
+  it requires administrator rights — and the network counters do not come from `GetIfTable2`.
+- `system.cpu.time` and `system.cpu.utilization` come from `GetSystemTimes` idle/kernel/user values
+  in 100 ns units, with `system = kernel - idle` and utilization as
+  Δmode / (Δuser + Δkernel). Only `cpu.mode=user`, `system` and `idle` are emitted: cores are
+  aggregated into one series with no `cpu.logical_number`, and Windows has no iowait, steal or nice
+  time.
+- Memory comes from `GlobalMemoryStatusEx`. Paging is the commit-based pagefile footprint:
+  `commitLimit = ullTotalPageFile`, `committed = commitLimit - ullAvailPageFile`,
+  `physicalUsed = ullTotalPhys - ullAvailPhys`, `pagefileTotal = max(0, commitLimit - ullTotalPhys)`,
+  `used = clamp(committed - physicalUsed, 0, pagefileTotal)` and `free = pagefileTotal - used`. When
+  the total is zero the whole paging section is absent.
+- `system.filesystem.usage` and `system.filesystem.utilization` cover fixed drive letters only.
+  `NTFS` maps to `ntfs`, `ReFS` to `refs`, `exFAT` to `exfat` and `FAT32`/`FAT` to `fat32`; any other
+  type omits the `system.filesystem.type` attribute but still reports usage and utilization.
+  `system.filesystem.mode` is `ro` or `rw`.
+- `system.process.count` has no `process.state` attribute because Windows does not expose the
+  ps-style process state classification. `system.process.limit` is emitted by the 15 s process
+  source with `Win32_OperatingSystem.MaxNumberOfProcesses`, refreshed through the 300 s CIM cache.
+  `system.uptime` comes from `GetTickCount64`.
+- `system.disk.io_time`, `system.disk.operation_time`, `system.cpu.frequency`,
+  `system.paging.faults`, `system.paging.utilization`, `system.process.created`,
+  `system.network.connection.count`, every `hw.*` metric and `system.pressure.*` are absent because
+  there is no corresponding source or semantic on Windows, not because their value is zero.
+- The Windows fixtures are synthetic and live collection has not been verified on real hardware; see
+  `testdata/windows/README.md` for fixture provenance and the per-item list of unverified checks.
 
 ## Workload attribution (answers "which agent did it?")
 
