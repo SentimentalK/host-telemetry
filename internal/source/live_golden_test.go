@@ -46,6 +46,7 @@ func TestLiveGolden(t *testing.T) {
 			t.Fatalf("first collect emitted %s before a second sample", schema.SystemCPUUtilization)
 		}
 	}
+	time.Sleep(50 * time.Millisecond)
 
 	second := collector.New(sources).CollectOnce(context.Background())
 	if len(second.Errors) != 0 {

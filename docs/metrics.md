@@ -21,7 +21,7 @@ Legend — Platforms: `L` Linux, `M` macOS, `W` Windows. Requirement: `R` recomm
 | `system.memory.limit` | UpDownCounter | `By` | — | L M W | 300s | Denominator for utilization; changes on hot-plug |
 | `system.memory.utilization` | Gauge | `1` | `system.memory.state=used\|available` | L M W | 15s | Cheap alerting signal |
 | `system.paging.usage` | UpDownCounter | `By` | `system.paging.state=used\|free`, `system.device.name` | L M W | 15s | Swap in use; correlated with the first slow minute |
-| `system.paging.operations` | Counter | `{operation}` | `system.paging.fault.type=major\|minor`, `system.paging.direction=in\|out` | L M W | 15s | Major faults / swap-in rate is the actual thrash signal |
+| `system.paging.operations` | Counter | `{operation}` | `system.paging.fault.type=major\|minor`, `system.paging.direction=in\|out` | L M W | 15s | Major faults / swap-in rate is the actual thrash signal. **Not emitted in M1** — swap in/out `fault.type` semantics still need an ADR |
 | `system.paging.faults` | Counter | `{fault}` | `system.paging.fault.type=major\|minor` | L M W | 15s | Distinguishes cold cache from real pressure |
 | `system.disk.io` | Counter | `By` | `disk.io.direction=read\|write`, `system.device.name` | L M W | 15s | Throughput, not latency |
 | `system.disk.operations` | Counter | `{operation}` | `disk.io.direction`, `system.device.name` | L M W | 15s | IOPS; small random reads are the usual build bottleneck |
@@ -35,10 +35,12 @@ mountpoint is skipped in M1.
 
 | `system.network.io` | Counter | `By` | `network.io.direction=receive\|transmit`, `network.interface.name` | L M W | 15s | "Big traffic came in" needs an interface-level denominator |
 | `system.network.errors` | Counter | `{error}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Hardware/driver trouble disguised as application slowness |
+| `system.network.packet.count` | Counter | `{packet}` | `system.device.name`, `network.io.direction=receive\|transmit` | L M W | 15s | Packet rate per device; many tiny packets look nothing like bulk bytes |
 | `system.network.packet.dropped` | Counter | `{packet}` | `network.io.direction`, `network.interface.name` | L M W | 15s | Drops explain retransmit-shaped latency |
 | `system.network.connection.count` | UpDownCounter | `{connection}` | `network.interface.name`, `network.transport=tcp`, `network.connection.state` | L M W | 15s | Connection storms from many agents |
 | `system.process.count` | UpDownCounter | `{process}` | `process.state=running\|sleeping\|stopped\|defunct` | L M W | 15s | Zombie/leak detection |
 | `system.process.created` | Counter | `{process}` | — | L M W | 15s | Fork storms (test runners, builds) |
+| `system.process.limit` | UpDownCounter | `{thread}` | — | L M W | 15s | Soft process/thread limit; the denominator for exhaustion (Linux: `Max processes`) |
 | `system.uptime` | Gauge | `s` | — | L M W | 4s | Proves the boot-install worked and detects unnoticed reboots; sampled on its own 4s source so a scrape at any moment is <5s from `/proc/uptime` |
 
 ## Hardware (answers "why did it get slow while idle?")

@@ -107,12 +107,12 @@ func run(args []string) {
 		SchemaVersion:  schema.Version,
 	}
 
-	snapshot := &snapshot{points: make(map[string]schema.Point)}
+	snapshot := newSnapshot()
 	sink := func(source string, points []schema.Point, err error, d time.Duration) {
 		if err != nil {
 			log.Printf("source %s: %v", source, err)
 		}
-		snapshot.update(points)
+		snapshot.update(source, points)
 		if store == nil || len(points) == 0 {
 			return
 		}
@@ -197,24 +197,32 @@ func defaultWALDir() string {
 }
 
 type snapshot struct {
-	mu     sync.Mutex
-	points map[string]schema.Point
+	mu      sync.Mutex
+	sources map[string]map[string]schema.Point
 }
 
-func (s *snapshot) update(points []schema.Point) {
+func newSnapshot() *snapshot {
+	return &snapshot{sources: make(map[string]map[string]schema.Point)}
+}
+
+func (s *snapshot) update(source string, points []schema.Point) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	series := make(map[string]schema.Point, len(points))
 	for _, point := range points {
-		s.points[seriesKey(point)] = point
+		series[seriesKey(point)] = point
 	}
+	s.sources[source] = series
 }
 
 func (s *snapshot) list() []schema.Point {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	out := make([]schema.Point, 0, len(s.points))
-	for _, point := range s.points {
-		out = append(out, point)
+	var out []schema.Point
+	for _, series := range s.sources {
+		for _, point := range series {
+			out = append(out, point)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return seriesLess(out[i], out[j]) })
 	return out
