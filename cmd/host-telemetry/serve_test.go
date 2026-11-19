@@ -29,12 +29,22 @@ func TestServeShutdownPreservesWAL(t *testing.T) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for {
+		ready := false
 		entries, err := os.ReadDir(dir)
-		if err == nil && len(entries) > 0 {
+		if err == nil {
+			for _, entry := range entries {
+				info, statErr := entry.Info()
+				if statErr == nil && info.Size() > 0 {
+					ready = true
+					break
+				}
+			}
+		}
+		if ready {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("wal directory %s stayed empty", dir)
+			t.Fatalf("wal directory %s has no non-empty segment", dir)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

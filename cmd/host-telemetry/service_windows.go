@@ -39,20 +39,23 @@ func (s *windowsService) Execute(args []string, requests <-chan svc.ChangeReques
 	for {
 		select {
 		case err := <-done:
+			changes <- svc.Status{State: svc.Stopped}
 			if err != nil {
 				log.Printf("host-telemetry: %v", err)
+				return false, 1
 			}
-			changes <- svc.Status{State: svc.Stopped}
 			return false, 0
 		case request := <-requests:
 			switch request.Cmd {
 			case svc.Stop, svc.Shutdown:
 				changes <- svc.Status{State: svc.StopPending}
 				cancel()
-				if err := <-done; err != nil {
-					log.Printf("host-telemetry: %v", err)
-				}
+				err := <-done
 				changes <- svc.Status{State: svc.Stopped}
+				if err != nil {
+					log.Printf("host-telemetry: %v", err)
+					return false, 1
+				}
 				return false, 0
 			case svc.Interrogate:
 				changes <- request.CurrentStatus
