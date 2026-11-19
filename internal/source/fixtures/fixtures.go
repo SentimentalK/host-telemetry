@@ -22,7 +22,7 @@ func newSources(platform, dir string) ([]source.Source, error) {
 	case "darwin":
 		return darwin.New(os.DirFS(dir)), nil
 	case "windows":
-		return []source.Source{windows.New(os.DirFS(dir))}, nil
+		return windows.New(os.DirFS(dir)), nil
 	default:
 		return nil, fmt.Errorf("fixtures: unknown platform %q", platform)
 	}

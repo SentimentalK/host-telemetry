@@ -31,6 +31,7 @@ import (
 	"github.com/SentimentalK/host-telemetry/internal/source/darwin"
 	"github.com/SentimentalK/host-telemetry/internal/source/fixtures"
 	"github.com/SentimentalK/host-telemetry/internal/source/linux"
+	"github.com/SentimentalK/host-telemetry/internal/source/windows"
 	"github.com/SentimentalK/host-telemetry/internal/wal"
 )
 
@@ -256,8 +257,10 @@ func loadSources(fixtureRoot, platform, sensors string) ([]source.Source, error)
 		return linux.NewLive(os.DirFS("/"), linux.Options{}), nil
 	case "darwin":
 		return darwin.NewLive(darwin.Options{Sensors: sensors == "macmon"}), nil
+	case "windows":
+		return windows.NewLive(windows.Options{}), nil
 	default:
-		return nil, fmt.Errorf("live collection supports linux and darwin only, running on %s", platform)
+		return nil, fmt.Errorf("live collection supports linux, darwin and windows only, running on %s", platform)
 	}
 }
 
