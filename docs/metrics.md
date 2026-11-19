@@ -155,13 +155,34 @@ failure is reported on the next collection; the previous snapshot is kept. The f
 | Metric | Type | Unit | Attributes | Platform | Interval | Why it exists |
 |---|---|---|---|---|---|---|
 | `workload.count` | Gauge | `{workload}` | `workload.kind=agent\|container\|unit`, `workload.state=working\|blocked\|done` | all | 30s | "At 21:00 I had 14 agents" is a metric, not a log grep |
-| `workload.cpu.time` | Counter | `s` | `workload.id`, `workload.project`, `cpu.mode` | all | 15s | Attribution; cgroup-backed on Linux |
-| `workload.memory.usage` | UpDownCounter | `By` | `workload.id`, `workload.project` | all | 15s | **cgroup v2 `memory.current` on Linux — the only non-double-counted number** |
-| `workload.pressure.utilization` | Gauge | `1` | `workload.id`, `system.pressure.resource` | L | 15s | `memory.pressure` per scope: which agent was being throttled, not just which was big |
+| `workload.cpu.time` | Counter | `s` | `workload.id`, `workload.project`, `cpu.mode` | all | 30s | Attribution; cgroup-backed on Linux |
+| `workload.memory.usage` | UpDownCounter | `By` | `workload.id`, `workload.project` | all | 30s | **cgroup v2 `memory.current` on Linux — the only non-double-counted number** |
+| `workload.pressure.utilization` | Gauge | `1` | `workload.id`, `system.pressure.resource` | L | 30s | `memory.pressure` per scope: which agent was being throttled, not just which was big |
 
-- cgroup v2 scope attribution wins over process-tree matching for the pids it covers.
-- `memory.current` includes page cache; file-backed pages may be charged to another cgroup (measured: `sleep` differs by 82%, a 200 MB anonymous process by 0.6%).
-- process-tree RSS double-counts shared pages and must never be summed into host totals.
+cgroup v2 takes priority: `workload.memory.usage` is `memory.current` and includes page cache;
+file-backed pages may be charged to a different cgroup (measured: `sleep` reports 82% less than
+VmRSS, a process holding 200 MB of anonymous memory differs by 0.6%).
+
+The process-tree fallback aggregates RSS, which double-counts shared pages and must never stand in
+for a host total; it labels a workload `workload.id=<comm>#<rootpid>`. CPU is accumulated by
+tracking the processes, so the series ends when the root process exits.
+
+`workload.count` is only aggregated by `workload.kind` and `workload.state`; per-workload series use
+the `workload.id` carried by `workload.memory.usage` and `workload.cpu.time`.
+
+## Events (OTLP Logs)
+
+Events are OTLP log records, not metrics: they never enter the `/metrics` or OTLP metric streams.
+`event.name` is a top-level log record field and every other attribute is flat. A detection keyed by
+`event.name` plus its subject is emitted at most once per 5-minute window, so an open condition does
+not spam the sink.
+
+| `event.name` | Attributes | Detection source | Dedupe key |
+|---|---|---|---|
+| `host.clock.skew` | `jump_ms` | M1 clockwatch (`Clock.Watch` jump threshold) | `clock` |
+| `host.oom.kill` | `pid`, `workload.id`, `rss` | `journalctl -k`, only lines matching `Killed process` | `pid` |
+| `host.disk.full` | `mountpoint`, `used_ratio` | `statfs` on writable mounts at `used_ratio >= 0.95` | `mountpoint` |
+| `host.thermal.throttle` | `cpu`, `from_hz`, `to_hz` | thermal zone `trip_point_0_temp` crossed while `scaling_cur_freq < cpuinfo_max_freq` | thermal zone type |
 
 ## Process detail (opt-in, bounded)
 
