@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	hwmonWait = 4 * time.Millisecond
+	hwmonWait = 3 * time.Millisecond
 
 	hwKindName = iota
 	hwKindTemperature
