@@ -241,11 +241,11 @@ func (s *liveNetworkSource) Name() string { return "darwin-network" }
 func (s *liveNetworkSource) Interval() time.Duration { return networkInterval }
 
 func (s *liveNetworkSource) Collect(ctx context.Context) ([]schema.Point, error) {
-	data, err := s.run(ctx, "netstat", "-ib")
+	data, err := s.run(ctx, "netstat", "-ibdnW")
 	if err != nil {
-		return nil, fmt.Errorf("netstat -ib: %w", err)
+		return nil, fmt.Errorf("netstat -ibdnW: %w", err)
 	}
-	stats, err := parseNetstat(data, "netstat -ib")
+	stats, err := parseNetstat(data, "netstat -ibdnW")
 	if err != nil {
 		return nil, err
 	}
@@ -293,11 +293,20 @@ func (s *liveProcessSource) Collect(ctx context.Context) ([]schema.Point, error)
 	if err != nil {
 		return nil, err
 	}
+	if sysData, runErr := s.run(ctx, "sysctl", "-a"); runErr == nil {
+		if sys, parseErr := parseSysctl(sysData, "sysctl -a"); parseErr == nil {
+			if limit, limitErr := parseSysctlInt(sys, "kern.maxproc", "sysctl -a"); limitErr == nil && limit > 0 {
+				stat.limit = limit
+				stat.hasLimit = true
+			}
+		}
+	}
 	return processPoints(stat), nil
 }
 
 type liveSensorsSource struct {
-	run func(ctx context.Context, name string, args ...string) ([]byte, error)
+	run  func(ctx context.Context, name string, args ...string) ([]byte, error)
+	warn sync.Once
 }
 
 func (s *liveSensorsSource) Name() string { return "darwin-sensors" }
@@ -307,6 +316,7 @@ func (s *liveSensorsSource) Interval() time.Duration { return sensorsInterval }
 func (s *liveSensorsSource) Collect(ctx context.Context) ([]schema.Point, error) {
 	data, err := s.run(ctx, "macmon", "pipe", "-s", "1", "-i", "1000")
 	if err != nil {
+		s.warn.Do(func() { log.Printf("darwin-sensors: %v", err) })
 		return nil, nil
 	}
 	stat, err := parseSensors(data, "macmon pipe")

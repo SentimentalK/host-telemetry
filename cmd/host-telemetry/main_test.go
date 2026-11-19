@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/SentimentalK/host-telemetry/internal/schema"
+	"github.com/SentimentalK/host-telemetry/internal/source"
 )
 
 func TestLoadSourcesRejectsMismatchedLivePlatform(t *testing.T) {
@@ -14,6 +15,32 @@ func TestLoadSourcesRejectsMismatchedLivePlatform(t *testing.T) {
 	if _, err := loadSources("", "darwin", ""); err == nil {
 		t.Fatal("loadSources accepted darwin live collection on linux")
 	}
+}
+
+func TestLoadSourcesSensorFilter(t *testing.T) {
+	plain, err := loadSources("../../testdata", "darwin", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasSource(plain, "darwin-sensors") {
+		t.Error("default sensors registered darwin-sensors")
+	}
+	enabled, err := loadSources("../../testdata", "darwin", "macmon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSource(enabled, "darwin-sensors") {
+		t.Error("macmon sensors did not register darwin-sensors")
+	}
+}
+
+func hasSource(sources []source.Source, name string) bool {
+	for _, src := range sources {
+		if src.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSnapshotReplacesSourceSeries(t *testing.T) {

@@ -12,9 +12,9 @@
 | `vm_stat.txt` | `vm_stat` | page size、`Pages free`、`Pages active`、`Pages inactive`、`Pages speculative`、`Pages wired down`、`Pages occupied by compressor` | `Pages free` 只参与 available 计算，不单独发 `state=free`（semconv v1.45.0 的 `system.memory.state` 已无 `free`） |
 | `boottime.txt` / `now.txt` | `sysctl -n kern.boottime` / `date +%s` | epoch 秒 | 差值即 `system.uptime`；`now < boot` 时报错 |
 | `ioreg.txt` | `ioreg -c IOBlockStorageDriver -r -l -w 0` | `Statistics` 的 `Bytes (Read/Write)`、`Operations (Read/Write)`、`Total Time (Read/Write)`（ns）；`IOMedia` 的 `BSD Name` | `system.device.name` 取 `Whole = Yes` 的 `IOMedia`；不发 `system.disk.io_time` |
-| `netstat.txt` | `netstat -ib` | `Ibytes/Obytes`、`Ipkts/Opkts`、`Ierrs/Oerrs`、`Drop` | 只消费含 `<Link#N>` 的接口行；`Drop` 只发 transmit 方向 |
+| `netstat.txt` | `netstat -ibdnW` | `Ibytes/Obytes`、`Ipkts/Opkts`、`Ierrs/Oerrs`、`Drop` | 只消费含 `<Link#N>` 的接口行；`Drop` 只发 transmit 方向 |
 | `mount.txt` / `df.txt` | `mount` + `df -kP` | 设备、mountpoint、fstype、`read-only` 选项；1024-blocks / Used / Available | 按 mountpoint 关联；`reserved = total - used - free`；解析器接受 5 列起的 POSIX 形态，fixture 额外保留 macOS `df -k` 的 `iused/ifree/%iused` 列 |
-| `ps.txt` | `ps -axo stat=` | 状态串首字符 `R`、`S/D/I`、`T`、`Z` | 四种 state（running/sleeping/stopped/defunct）都发，0 也发；未知状态跳过 |
+| `ps.txt` | `ps -axo stat=` | 状态串首字符 `R`、`S/D/I/U`、`T`、`Z` | 四种 state（running/sleeping/stopped/defunct）都发，0 也发；未知状态跳过 |
 | `macmon.json` | `macmon pipe -s 1 -i 1000` | `temp.cpu_temp_avg`/`gpu_temp_avg`、`fans[].name/rpm/max_rpm`、`cpu_power`/`gpu_power`/`sys_power` | 可选子 source；字段名归一到 `hw.*`；JSON null 跳过；文件不存在时整源不发点、不报错 |
 
 `ioreg-platform.txt`（`hostinfo` 测试用）与 `install-dry-run.golden`（launchd 安装计划测试用）是测试
@@ -24,7 +24,7 @@ harness fixture，不参与遥测采集。
 
 - `real-synthetic-00`、`real-synthetic-01`：两快照 fixture，目录名排序后取首末快照。`system.cpu.time`
   取末快照计数，`system.cpu.utilization` 用首末 tick 差分；内存、uptime 与其余源取末快照（`-01`）。
-  `golden.txt` 由这两个目录经真实解析路径生成；`-00` 的 `gpu_power` 为 null，用来覆盖 null 跳过路径。
+  `golden.txt` 由这两个目录经真实解析路径生成；JSON null 跳过由 `TestSensorsNullSkipped` 覆盖。
 - `sample-00`：M0 兼容快照（`legacy` 模式），只有 `sysctl.txt` / `vm_stat.txt` / `boottime.txt` / `now.txt`；
   缺失文件的源整源跳过。`golden-sample.txt` 由它生成，覆盖 inventory / memory / paging / uptime 子集。
 - 区别：`golden.txt` 是 real-synthetic 全源 golden；`golden-sample.txt` 是 sample-00 的 M0 回退 golden，

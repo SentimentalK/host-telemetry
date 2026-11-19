@@ -222,8 +222,9 @@ func parseNetstat(data []byte, file string) ([]networkStat, error) {
 		if link < 0 {
 			continue
 		}
+		name := strings.TrimPrefix(fields[0], "*")
 		if len(fields) < link+9 {
-			return nil, fmt.Errorf("%s: line %d: interface %q has incomplete counters", file, i+1, fields[0])
+			return nil, fmt.Errorf("%s: line %d: interface %q has incomplete counters", file, i+1, name)
 		}
 		numbers := fields[len(fields)-8:]
 		values := make([]float64, len(numbers))
@@ -235,7 +236,7 @@ func parseNetstat(data []byte, file string) ([]networkStat, error) {
 			values[k] = value
 		}
 		out = append(out, networkStat{
-			name:      fields[0],
+			name:      name,
 			rxPackets: values[0],
 			rxErrors:  values[1],
 			rxBytes:   values[2],
@@ -358,9 +359,14 @@ func parseDF(data []byte, file string) (map[string]dfEntry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("%s: line %d: available %q: %w", file, i+1, fields[3], err)
 		}
-		mountpoint := fields[len(fields)-1]
-		if len(fields) >= 9 {
+		var mountpoint string
+		switch {
+		case len(fields) >= 9:
 			mountpoint = strings.Join(fields[8:], " ")
+		case len(fields) >= 6:
+			mountpoint = strings.Join(fields[5:], " ")
+		default:
+			mountpoint = fields[len(fields)-1]
 		}
 		out[mountpoint] = dfEntry{blocks: blocks, used: used, available: available}
 	}
@@ -397,7 +403,7 @@ func parseProcesses(data []byte, file string) (processStat, error) {
 		switch state[0] {
 		case 'R':
 			stat.running++
-		case 'S', 'D', 'I':
+		case 'S', 'D', 'I', 'U':
 			stat.sleeping++
 		case 'T':
 			stat.stopped++
